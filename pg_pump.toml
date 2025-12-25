@@ -1,0 +1,13 @@
+[source_database]
+host = "localhost"
+port = 1433
+database = "master"
+user = "SA"
+password = "SA"
+
+[target_database]
+host = "localhost"
+port = 1433
+database = "master"
+user = "SA"
+password = "SA"
