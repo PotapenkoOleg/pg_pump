@@ -1,13 +1,13 @@
 [source_database]
 host = "localhost"
 port = 1433
-database = "master"
-user = "SA"
-password = "SA"
+database = "developer"
+user = "sa"
+password = "wOf-odESTO2r"
 
 [target_database]
 host = "localhost"
-port = 1433
-database = "master"
-user = "SA"
-password = "SA"
+port = 5432
+database = "developer"
+user = "postgres"
+password = "postgres"

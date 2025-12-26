@@ -8,13 +8,45 @@ pub struct Config {
     target_database: TargetDatabase,
 }
 
+impl Config {
+    pub fn get_source_database_as_ref(&self) -> &SourceDatabase {
+        &self.source_database
+    }
+
+    pub fn get_target_database_as_ref(&self) -> &TargetDatabase {
+        &self.target_database
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SourceDatabase {
     host: String,
-    port: i32,
+    port: u16,
     database: String,
     user: String,
     password: String,
+}
+
+impl SourceDatabase {
+    pub fn get_host_as_ref(&self) -> &String {
+        &self.host
+    }
+
+    pub fn get_port_as_ref(&self) -> &u16 {
+        &self.port
+    }
+
+    pub fn get_database_as_ref(&self) -> &String {
+        &self.database
+    }
+
+    pub fn get_user_as_ref(&self) -> &String {
+        &self.user
+    }
+
+    pub fn get_password_as_ref(&self) -> &String {
+        &self.password
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -24,6 +56,28 @@ pub struct TargetDatabase {
     database: String,
     user: String,
     password: String,
+}
+
+impl TargetDatabase {
+    pub fn get_host_as_ref(&self) -> &String {
+        &self.host
+    }
+
+    pub fn get_port_as_ref(&self) -> &i32 {
+        &self.port
+    }
+
+    pub fn get_database_as_ref(&self) -> &String {
+        &self.database
+    }
+
+    pub fn get_user_as_ref(&self) -> &String {
+        &self.user
+    }
+
+    pub fn get_password_as_ref(&self) -> &String {
+        &self.password
+    }
 }
 
 pub struct ConfigProvider<'a> {

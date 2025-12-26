@@ -1,8 +1,8 @@
 mod clap_parser;
 mod config_provider;
 mod helpers;
-mod sql_server;
 mod version;
+mod sql_server_provider;
 
 use crate::clap_parser::Args;
 use crate::config_provider::ConfigProvider;
@@ -11,6 +11,8 @@ use anyhow::Result;
 use clap::Parser;
 use colored::Colorize;
 use std::process;
+use tokio::time::Instant;
+use crate::sql_server_provider::sql_server_provider::SqlServerProvider;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -26,9 +28,15 @@ async fn main() -> Result<()> {
         process::exit(1);
     }
     let config = file_load_result.ok().unwrap();
-    //println!("{:#?}", config);
     println!("{}", "DONE Loading Config File".green());
     print_separator();
+    println!("Running SQL Server Provider ...");
+    let sql_server_provider =
+        SqlServerProvider::new(&config.get_source_database_as_ref());
+    let now = Instant::now();
+    sql_server_provider.sql_server_test().await?;
+    let elapsed = now.elapsed();
+    println!("Elapsed: {:.2?}", elapsed);
 
     Ok(())
 }
