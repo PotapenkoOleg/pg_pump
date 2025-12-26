@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:latest
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes: # TODO: Create directory/volume on your machine
+      - "postgres_volume:/var/lib/postgresql/data"
+    ports: # TODO: Set other port on the left if it's already used on your machine
+      - "5432:5432"
+    container_name: postgres
+#    networks:
+#      - postgres_network
+
+  sql_server:
+    image: "mcr.microsoft.com/mssql/server:2022-latest"
+    restart: "always"
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "wOf-odESTO2r"
+      # MSSQL_PID: "Standard|Developer"
+    volumes:
+      - "sql_server_volume:/var/opt/mssql"
+    ports:
+      - "1433:1433"
+    container_name: sql_server
+#    networks:
+#      - sql_server_network
+
+#networks:
+#  postgres_network:
+#  sql_server_network:
+volumes:
+  postgres_volume:
+  # external: true
+  sql_server_volume:
+  # external: true
