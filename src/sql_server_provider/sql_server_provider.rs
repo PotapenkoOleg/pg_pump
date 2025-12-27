@@ -29,6 +29,21 @@ impl SqlServerProvider {
         SqlServerProvider { config }
     }
 
+    pub async fn create_connection_pool(
+        &self,
+        threads: u32,
+        timeout: u64,
+    ) -> Result<Pool<ConnectionManager>> {
+        let manager = ConnectionManager::new(self.config.clone());
+        let pool = Pool::builder()
+            .max_size(threads)
+            .connection_timeout(std::time::Duration::from_secs(timeout))
+            .build(manager)
+            .await?;
+
+        Ok(pool)
+    }
+
     pub async fn sql_server_test(&self) -> Result<()> {
         let manager = ConnectionManager::new(self.config.clone());
         let pool = Pool::builder()
@@ -42,16 +57,20 @@ impl SqlServerProvider {
             let pool = pool.clone();
             let handle: JoinHandle<()> = tokio::spawn(async move {
                 let mut client = pool.get().await.unwrap();
-                let mut stream = client.query("SELECT TOP 1000 ID, FileNumber, Code FROM [Sample].[TestData1]", &[]).await.unwrap();
+                let mut stream = client
+                    .query(
+                        "SELECT TOP 1000 ID, FileNumber, Code FROM [Sample].[TestData1]",
+                        &[],
+                    )
+                    .await
+                    .unwrap();
                 while let Some(item) = stream.try_next().await.unwrap() {
                     match item {
                         QueryItem::Row(row) => {
                             let id: i64 = row.get(0).expect("id not found or wrong type");
-                            let primary_file_row_number: i32 = row
-                                .get(1)
-                                .expect("FileNumber not found or wrong type");
-                            let fund_code: &str =
-                                row.get(2).expect("Code not found or wrong type");
+                            let primary_file_row_number: i32 =
+                                row.get(1).expect("FileNumber not found or wrong type");
+                            let fund_code: &str = row.get(2).expect("Code not found or wrong type");
 
                             println!(
                                 "i = {}, ID = {}, FileNumber = {}, Code = {}",
@@ -69,12 +88,13 @@ impl SqlServerProvider {
                         QueryItem::Metadata(_meta) => {
                             //eprintln!("Error processing row: {}", e);
                             for c in _meta.columns() {
-                                ;
                                 let ct = c.column_type();
                                 match ct {
                                     ColumnType::Int4 => println!("{}: Column type: Int4", c.name()),
                                     ColumnType::Int8 => println!("{}: Column type: Int8", c.name()),
-                                    ColumnType::BigVarChar => println!("{}: Column type: BigVarChar", c.name()),
+                                    ColumnType::BigVarChar => {
+                                        println!("{}: Column type: BigVarChar", c.name())
+                                    }
                                     _ => println!("{}: Column type: Other", c.name()),
                                 }
                             }

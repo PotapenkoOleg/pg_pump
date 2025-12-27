@@ -52,7 +52,7 @@ impl SourceDatabase {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TargetDatabase {
     host: String,
-    port: i32,
+    port: u16,
     database: String,
     user: String,
     password: String,
@@ -63,7 +63,7 @@ impl TargetDatabase {
         &self.host
     }
 
-    pub fn get_port_as_ref(&self) -> &i32 {
+    pub fn get_port_as_ref(&self) -> &u16 {
         &self.port
     }
 

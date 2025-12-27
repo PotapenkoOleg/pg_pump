@@ -18,13 +18,27 @@ pub struct PostgresConsumer {
 impl PostgresConsumer {
     pub fn new(target_database: &TargetDatabase) -> Self {
         let mut config = Config::new();
-        config.host("localhost");
-        config.port(5432);
-        config.dbname("developer");
-        config.user("postgres");
-        config.password("postgres");
+        config.host(target_database.get_host_as_ref());
+        config.port(target_database.get_port_as_ref().clone());
+        config.dbname(target_database.get_database_as_ref());
+        config.user(target_database.get_user_as_ref());
+        config.password(target_database.get_password_as_ref());
         config.keepalives(true);
         PostgresConsumer { config }
+    }
+
+    pub async fn create_connection_pool(
+        &self,
+        threads: u32,
+        timeout: u64,
+    ) -> Result<Pool<PostgresConnectionManager<NoTls>>> {
+        let manager = PostgresConnectionManager::new(self.config.clone(), NoTls);
+        let pool = Pool::builder()
+            .max_size(threads)
+            .connection_timeout(std::time::Duration::from_secs(timeout))
+            .build(manager)
+            .await?;
+        Ok(pool)
     }
 
     pub async fn postgres_copy_test(&self) -> Result<()> {
