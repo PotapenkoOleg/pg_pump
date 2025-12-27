@@ -4,7 +4,9 @@ use anyhow::Result;
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 use futures_util::TryStreamExt;
+use futures_util::future::join_all;
 use std::pin::pin;
+use tokio::task::JoinHandle;
 use tokio_postgres::binary_copy::BinaryCopyInWriter;
 use tokio_postgres::types::Type;
 use tokio_postgres::{Client, Config, Error, GenericClient, NoTls};
@@ -68,30 +70,36 @@ impl PostgresConsumer {
             .build(manager)
             .await?;
 
-        let connection = pool.get().await?;
-        let client = connection.client();
+        let mut handles = Vec::new();
+        for task_id in 1..=10 {
+            let pool = pool.clone();
+            let handle: JoinHandle<Result<()>> = tokio::spawn(async move {
+                let connection = pool.get().await?;
+                let client = connection.client();
 
-        let sink = client
-            .copy_in("COPY \"Sample\".\"TestData1\" (\"ID\", \"FileNumber\", \"Code\") FROM STDIN BINARY")
-            .await?;
+                let sink = client
+                    .copy_in("COPY \"Sample\".\"TestData1\" (\"ID\", \"FileNumber\", \"Code\") FROM STDIN BINARY")
+                    .await?;
 
-        let mut writer = pin!(BinaryCopyInWriter::new(
-            sink,
-            &[Type::INT8, Type::INT4, Type::VARCHAR]
-        ));
+                let mut writer = pin!(BinaryCopyInWriter::new(
+                    sink,
+                    &[Type::INT8, Type::INT4, Type::VARCHAR]
+                ));
 
-        for i in 0..1_000_000i64 {
-            writer
-                .as_mut()
-                .write(&[&i, &0i32, &format!("the value for {i}")])
-                .await?;
+                for i in 0..100_000i64 {
+                    writer
+                        .as_mut()
+                        .write(&[&i, &task_id, &format!("the value for {i}")])
+                        .await?;
+                }
+
+                writer.finish().await?;
+                Ok(())
+            });
+            handles.push(handle);
         }
 
-        writer.finish().await?;
-
-        // let rows = conn.query("SELECT 1 + 1", &[]).await?;
-        // let value: i32 = rows[0].get(0);
-        // println!("1 + 1 = {}", value);
+        join_all(handles).await;
 
         Ok(())
     }

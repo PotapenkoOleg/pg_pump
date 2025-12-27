@@ -8,3 +8,13 @@ CREATE TABLE "Sample"."TestData1"
     "FileNumber" INT,
     "Code"       VARCHAR(100)
 );
+
+--DROP TABLE "Sample"."TestData1";
+
+TRUNCATE TABLE "Sample"."TestData1";
+
+SELECT * FROM "Sample"."TestData1";
+
+SELECT COUNT(*) FROM "Sample"."TestData1";
+
+SELECT COUNT(*) FROM "Sample"."TestData1" GROUP BY "FileNumber";
