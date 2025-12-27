@@ -7,13 +7,22 @@ use futures_util::TryStreamExt;
 use std::pin::pin;
 use tokio_postgres::binary_copy::BinaryCopyInWriter;
 use tokio_postgres::types::Type;
-use tokio_postgres::{Client, Error, NoTls};
+use tokio_postgres::{Client, Config, Error, GenericClient, NoTls};
 
-pub struct PostgresConsumer {}
+pub struct PostgresConsumer {
+    config: Config,
+}
 
 impl PostgresConsumer {
     pub fn new(target_database: &TargetDatabase) -> Self {
-        PostgresConsumer {}
+        let mut config = Config::new();
+        config.host("localhost");
+        config.port(5432);
+        config.dbname("developer");
+        config.user("postgres");
+        config.password("postgres");
+        config.keepalives(true);
+        PostgresConsumer { config }
     }
 
     pub async fn postgres_copy_test(&self) -> Result<()> {
@@ -52,20 +61,37 @@ impl PostgresConsumer {
     }
 
     pub async fn postgres_pool_test(&self) -> Result<()> {
-        // dotenvy::dotenv()?;
-        // let database_url = std::env::var("DATABASE_URL")?;
+        let manager = PostgresConnectionManager::new(self.config.clone(), NoTls);
+        let pool = Pool::builder()
+            .max_size(10)
+            .connection_timeout(std::time::Duration::from_secs(10))
+            .build(manager)
+            .await?;
 
-        let database_url = "host=localhost user=postgres password=postgres dbname=developer";
+        let connection = pool.get().await?;
+        let client = connection.client();
 
-        let manager = PostgresConnectionManager::new_from_stringlike(database_url, NoTls)?;
+        let sink = client
+            .copy_in("COPY \"Sample\".\"TestData1\" (\"ID\", \"FileNumber\", \"Code\") FROM STDIN BINARY")
+            .await?;
 
-        let pool = Pool::builder().max_size(10).build(manager).await?;
+        let mut writer = pin!(BinaryCopyInWriter::new(
+            sink,
+            &[Type::INT8, Type::INT4, Type::VARCHAR]
+        ));
 
-        let conn = pool.get().await?;
+        for i in 0..1_000_000i64 {
+            writer
+                .as_mut()
+                .write(&[&i, &0i32, &format!("the value for {i}")])
+                .await?;
+        }
 
-        let rows = conn.query("SELECT 1 + 1", &[]).await?;
-        let value: i32 = rows[0].get(0);
-        println!("1 + 1 = {}", value);
+        writer.finish().await?;
+
+        // let rows = conn.query("SELECT 1 + 1", &[]).await?;
+        // let value: i32 = rows[0].get(0);
+        // println!("1 + 1 = {}", value);
 
         Ok(())
     }

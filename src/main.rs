@@ -18,10 +18,10 @@ use crate::sql_server_provider::sql_server_provider::SqlServerProvider;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args = Args::parse();
     print_separator();
     print_banner();
     print_separator();
-    let args = Args::parse();
     println!("Loading Config File: <{}> ", &args.config_file);
     let config_provider = ConfigProvider::new(&args.config_file);
     let file_load_result = config_provider.read_config().await;
@@ -48,7 +48,7 @@ async fn main() -> Result<()> {
     let elapsed = now.elapsed();
     println!("Elapsed: {:.2?}", elapsed);
     print_separator();
-    
+
 
     Ok(())
 }
