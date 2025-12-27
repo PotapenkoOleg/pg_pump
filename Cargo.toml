@@ -17,6 +17,8 @@ toml = "0.9"
 colored = "3.0"
 tokio-postgres = "0.7"
 futures-util = "0.3"
+bb8-postgres = "0.9"
+dotenvy = "0.15"
 
 [dev-dependencies]
 assert_cmd = "2.1"

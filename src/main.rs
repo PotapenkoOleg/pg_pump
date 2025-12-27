@@ -43,7 +43,8 @@ async fn main() -> Result<()> {
     println!("Running Postgres Consumer ...");
     let postgres_consumer = PostgresConsumer::new(&config.get_target_database_as_ref());
     let now = Instant::now();
-    postgres_consumer.postgres_copy_test().await?;
+    //postgres_consumer.postgres_copy_test().await?;
+    postgres_consumer.postgres_pool_test().await?;
     let elapsed = now.elapsed();
     println!("Elapsed: {:.2?}", elapsed);
     print_separator();

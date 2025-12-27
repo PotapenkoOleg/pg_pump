@@ -1,6 +1,8 @@
 use crate::config_provider::TargetDatabase;
 // ---
 use anyhow::Result;
+use bb8::Pool;
+use bb8_postgres::PostgresConnectionManager;
 use futures_util::TryStreamExt;
 use std::pin::pin;
 use tokio_postgres::binary_copy::BinaryCopyInWriter;
@@ -45,6 +47,25 @@ impl PostgresConsumer {
 
         writer.finish().await?;
         println!("Successfully inserted 1,000,000 rows via binary copy.");
+
+        Ok(())
+    }
+
+    pub async fn postgres_pool_test(&self) -> Result<()> {
+        // dotenvy::dotenv()?;
+        // let database_url = std::env::var("DATABASE_URL")?;
+
+        let database_url = "host=localhost user=postgres password=postgres dbname=developer";
+
+        let manager = PostgresConnectionManager::new_from_stringlike(database_url, NoTls)?;
+
+        let pool = Pool::builder().max_size(10).build(manager).await?;
+
+        let conn = pool.get().await?;
+
+        let rows = conn.query("SELECT 1 + 1", &[]).await?;
+        let value: i32 = rows[0].get(0);
+        println!("1 + 1 = {}", value);
 
         Ok(())
     }
