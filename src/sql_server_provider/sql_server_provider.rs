@@ -46,17 +46,17 @@ impl SqlServerProvider {
                 while let Some(item) = stream.try_next().await.unwrap() {
                     match item {
                         QueryItem::Row(row) => {
-                            // let id: i64 = row.get(0).expect("id not found or wrong type");
-                            // let primary_file_row_number: i32 = row
-                            //     .get(1)
-                            //     .expect("FileNumber not found or wrong type");
-                            // let fund_code: &str =
-                            //     row.get(2).expect("Code not found or wrong type");
-                            //
-                            // println!(
-                            //     "i = {}, ID = {}, FileNumber = {}, Code = {}",
-                            //     i, id, primary_file_row_number, fund_code
-                            // );
+                            let id: i64 = row.get(0).expect("id not found or wrong type");
+                            let primary_file_row_number: i32 = row
+                                .get(1)
+                                .expect("FileNumber not found or wrong type");
+                            let fund_code: &str =
+                                row.get(2).expect("Code not found or wrong type");
+
+                            println!(
+                                "i = {}, ID = {}, FileNumber = {}, Code = {}",
+                                i, id, primary_file_row_number, fund_code
+                            );
                             // TODO:
                             //let id: i32 = row.try_get::<i32, _>(0)?.expect("NULL id");
                             //let name: &str = row.try_get::<&str, _>(1)?.expect("NULL name");
@@ -73,6 +73,8 @@ impl SqlServerProvider {
                                 let ct = c.column_type();
                                 match ct {
                                     ColumnType::Int4 => println!("{}: Column type: Int4", c.name()),
+                                    ColumnType::Int8 => println!("{}: Column type: Int8", c.name()),
+                                    ColumnType::BigVarChar => println!("{}: Column type: BigVarChar", c.name()),
                                     _ => println!("{}: Column type: Other", c.name()),
                                 }
                             }

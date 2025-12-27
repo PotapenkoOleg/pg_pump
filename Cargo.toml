@@ -15,6 +15,8 @@ bb8-tiberius = "0.16"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.9"
 colored = "3.0"
+tokio-postgres = "0.7"
+futures-util = "0.3"
 
 [dev-dependencies]
 assert_cmd = "2.1"
