@@ -10,6 +10,7 @@ use crate::clap_parser::Args;
 use crate::config_provider::ConfigProvider;
 use crate::helpers::{print_banner, print_separator};
 use crate::postgres_consumer::postgres_consumer::PostgresConsumer;
+use crate::shared::pg_pump_column_type::PgPumpColumnType;
 use crate::sql_server_provider::sql_server_provider::SqlServerProvider;
 use anyhow::Result;
 use bb8::Pool;
@@ -67,19 +68,26 @@ async fn main() -> Result<()> {
     // region SQL Server Metadata
     println!("Getting SQL Server metadata ...");
     let sql_server_provider = SqlServerProvider::new(&config.get_source_database_as_ref());
-    let sql_server_metadata = sql_server_provider
+    let sql_server_metadata_result = sql_server_provider
         .get_table_metadata(&schema_name, &table_name)
         .await;
-
+    if sql_server_metadata_result.is_err() {
+        eprintln!(
+            "{}",
+            sql_server_metadata_result.err().unwrap().to_string().red()
+        );
+        process::exit(1);
+    }
+    let sql_server_metadata = sql_server_metadata_result.ok().unwrap();
     println!("{}", "DONE Getting SQL Server metadata".green());
     // endregion
     print_separator();
     // region Postgres Metadata
     println!("Getting Postgres metadata ...");
     let postgres_consumer = PostgresConsumer::new(&config.get_target_database_as_ref());
-    let postgres_metadata = postgres_consumer
-        .get_table_metadata(&schema_name, &table_name)
-        .await;
+    // let postgres_metadata = postgres_consumer
+    //     .get_table_metadata(&schema_name, &table_name)
+    //     .await;
     println!("{}", "DONE Postgres metadata".green());
     // endregion
     print_separator();
@@ -114,7 +122,16 @@ async fn main() -> Result<()> {
     print_separator();
     // region COPY data from SQL Server to Postgres
     println!("COPY data from SQL Server to Postgres ...");
-    copy_data(threads, sql_server_pool, postgres_pool).await;
+    copy_data(
+        threads,
+        sql_server_pool,
+        postgres_pool,
+        sql_server_metadata,
+        &schema_name,
+        &table_name,
+        &column_name
+    )
+    .await;
     println!(
         "{}",
         "DONE COPY data from SQL Server to Postgres ...".green()
@@ -149,32 +166,58 @@ async fn copy_data(
     threads: u32,
     sql_server_pool: Pool<ConnectionManager>,
     postgres_pool: Pool<PostgresConnectionManager<NoTls>>,
+    sql_server_metadata: Vec<(String, PgPumpColumnType)>,
+    schema_name: &String,
+    table_name: &String,
+    column_name: &String
 ) {
     let now = Instant::now();
     let mut handles = Vec::new();
+    let sql_server_columns = sql_server_metadata
+        .iter()
+        .map(|x| format!("[{}]",x.0.clone()))
+        .collect::<Vec<String>>()
+        .join(", ");
+    let postgres_columns = sql_server_metadata
+        .iter()
+        .map(|x| format!("\"{}\"", x.0.clone()))
+        .collect::<Vec<String>>()
+        .join(", ");
     for thread_id in 0..threads.clone() {
         let sql_server_pool = sql_server_pool.clone();
         let postgres_pool = postgres_pool.clone();
+        let schema_name = schema_name.clone();
+        let table_name = table_name.clone();
+        let sql_server_columns = sql_server_columns.clone();
+        let postgres_columns = postgres_columns.clone();
+        let column_name = column_name.clone();
+
+
         let handle: JoinHandle<Result<()>> = tokio::spawn(async move {
             let mut sql_server_client = sql_server_pool.get().await.unwrap();
-            let start = 0;
-            let end = 1000;
+            let sql_server_stream_query = format!(
+                "SELECT {} FROM [{}].[{}] WITH (NOLOCK) WHERE {} BETWEEN @P1 AND @P2;",
+                sql_server_columns, schema_name, table_name, column_name
+            );
+            let start = 0i64; // TODO:
+            let end = 10i64;
+
             let mut sql_server_stream = sql_server_client
-                .query(
-                    "SELECT ID, FileNumber, Code FROM [Sample].[TestData1] WITH (NOLOCK) WHERE ID BETWEEN @P1 AND @P1;", // TODO
-                    &[&start, &end],
-                )
+                .query(&sql_server_stream_query, &[&start, &end])
                 .await
                 .unwrap();
+
             let postgres_connection = postgres_pool.get().await?;
             let postgres_client = postgres_connection.client();
-            let postgres_sink = postgres_client
-                .copy_in("COPY \"Sample\".\"TestData1\" (\"ID\", \"FileNumber\", \"Code\") FROM STDIN BINARY")
-                .await?;
 
+            let postgres_sink_query = format!(
+                "COPY \"{}\".\"{}\" ({}) FROM STDIN BINARY;",
+                schema_name, table_name, postgres_columns,
+            );
+            let postgres_sink = postgres_client.copy_in(&postgres_sink_query).await?;
             let mut postgres_writer = pin!(BinaryCopyInWriter::new(
                 postgres_sink,
-                &[Type::INT8, Type::INT4, Type::VARCHAR]
+                &[Type::INT8, Type::INT4, Type::VARCHAR] // TODO:
             ));
             let mut count = 0u64;
             while let Some(item) = sql_server_stream.try_next().await.unwrap() {
@@ -202,7 +245,8 @@ async fn copy_data(
         });
         handles.push(handle);
     }
-    join_all(handles).await;
+    let x = join_all(handles).await;
+
     let elapsed = now.elapsed();
     println!("Elapsed: {:.2?}", elapsed);
 }

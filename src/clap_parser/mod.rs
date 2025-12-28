@@ -16,16 +16,16 @@ pub struct Args {
     #[arg(long, short = 'F', default_value = "pg_pump.toml")]
     pub config_file: String,
 
-    #[arg(long, short = 't', default_value = "10")]
+    #[arg(long, short = 't', default_value = "1")]
     pub threads: u32,
 
-    #[arg(long, short = 'o', default_value = "15")]
+    #[arg(long, short = 'o', default_value = "600")]
     pub timeout: u64,
 
     #[arg(long, short = 'S', default_value = "Sample")] // TODO: remove default value
     pub schema: String,
 
-    #[arg(long, short = 'T', default_value = "AllTypes")] // TODO: remove default value
+    #[arg(long, short = 'T', default_value = "TestData1")] // TODO: remove default value
     pub table: String,
 
     #[arg(long, short = 'C', default_value = "ID")] // TODO: remove default value
