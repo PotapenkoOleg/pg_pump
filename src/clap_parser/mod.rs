@@ -1,4 +1,10 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
+
+#[derive(Debug, Clone, ValueEnum)]
+pub enum CheckMetadata {
+    Yes,
+    No,
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -19,9 +25,12 @@ pub struct Args {
     #[arg(long, short = 'S', default_value = "Sample")] // TODO: remove default value
     pub schema: String,
 
-    #[arg(long, short = 'T', default_value = "TestData1")] // TODO: remove default value
+    #[arg(long, short = 'T', default_value = "AllTypes")] // TODO: remove default value
     pub table: String,
 
     #[arg(long, short = 'C', default_value = "ID")] // TODO: remove default value
     pub column: String,
+
+    #[arg(long, short = 'M', value_enum, default_value_t = CheckMetadata::Yes)]
+    pub check_metadata: CheckMetadata,
 }

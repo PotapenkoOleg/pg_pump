@@ -2,6 +2,7 @@ mod clap_parser;
 mod config_provider;
 mod helpers;
 mod postgres_consumer;
+mod shared;
 mod sql_server_provider;
 mod version;
 
@@ -11,6 +12,9 @@ use crate::helpers::{print_banner, print_separator};
 use crate::postgres_consumer::postgres_consumer::PostgresConsumer;
 use crate::sql_server_provider::sql_server_provider::SqlServerProvider;
 use anyhow::Result;
+use bb8::Pool;
+use bb8_postgres::PostgresConnectionManager;
+use bb8_tiberius::ConnectionManager;
 use clap::Parser;
 use colored::Colorize;
 use futures_util::TryStreamExt;
@@ -20,9 +24,9 @@ use std::process;
 use tiberius::{ColumnType, QueryItem};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use tokio_postgres::GenericClient;
 use tokio_postgres::binary_copy::BinaryCopyInWriter;
 use tokio_postgres::types::Type;
+use tokio_postgres::{GenericClient, NoTls};
 
 const MIN_THREADS: u32 = 10;
 const MAX_THREADS: u32 = 100;
@@ -60,9 +64,27 @@ async fn main() -> Result<()> {
     println!("{}", "DONE Loading Config File".green());
     // endregion
     print_separator();
+    // region SQL Server Metadata
+    println!("Getting SQL Server metadata ...");
+    let sql_server_provider = SqlServerProvider::new(&config.get_source_database_as_ref());
+    let sql_server_metadata = sql_server_provider
+        .get_table_metadata(&schema_name, &table_name)
+        .await;
+
+    println!("{}", "DONE Getting SQL Server metadata".green());
+    // endregion
+    print_separator();
+    // region Postgres Metadata
+    println!("Getting Postgres metadata ...");
+    let postgres_consumer = PostgresConsumer::new(&config.get_target_database_as_ref());
+    let postgres_metadata = postgres_consumer
+        .get_table_metadata(&schema_name, &table_name)
+        .await;
+    println!("{}", "DONE Postgres metadata".green());
+    // endregion
+    print_separator();
     // region SQL Server Connection Pool
     println!("Creating SQL Server Connection Pool ...");
-    let sql_server_provider = SqlServerProvider::new(&config.get_source_database_as_ref());
     let sql_server_pool_result = sql_server_provider
         .create_connection_pool(threads.clone(), timeout.clone())
         .await;
@@ -78,8 +100,7 @@ async fn main() -> Result<()> {
     // endregion
     print_separator();
     // region Postgres Connection Pool
-    println!("Creating SQL Server Connection Pool ...");
-    let postgres_consumer = PostgresConsumer::new(&config.get_target_database_as_ref());
+    println!("Creating Postgres Connection Pool ...");
     let postgres_pool_result = postgres_consumer
         .create_connection_pool(threads.clone(), timeout.clone())
         .await;
@@ -93,6 +114,42 @@ async fn main() -> Result<()> {
     print_separator();
     // region COPY data from SQL Server to Postgres
     println!("COPY data from SQL Server to Postgres ...");
+    copy_data(threads, sql_server_pool, postgres_pool).await;
+    println!(
+        "{}",
+        "DONE COPY data from SQL Server to Postgres ...".green()
+    );
+    // endregion
+    print_separator();
+
+    Ok(())
+}
+
+fn adjust_number_of_threads(threads: &u32) -> u32 {
+    if *threads < MIN_THREADS {
+        return MIN_THREADS;
+    }
+    if *threads > MAX_THREADS {
+        return MAX_THREADS;
+    }
+    *threads
+}
+
+fn adjust_timeout(timeout: &u64) -> u64 {
+    if *timeout < MIN_TIMEOUT {
+        return MIN_TIMEOUT;
+    }
+    if *timeout > MAX_TIMEOUT {
+        return MAX_TIMEOUT;
+    }
+    *timeout
+}
+
+async fn copy_data(
+    threads: u32,
+    sql_server_pool: Pool<ConnectionManager>,
+    postgres_pool: Pool<PostgresConnectionManager<NoTls>>,
+) {
     let now = Instant::now();
     let mut handles = Vec::new();
     for thread_id in 0..threads.clone() {
@@ -100,10 +157,12 @@ async fn main() -> Result<()> {
         let postgres_pool = postgres_pool.clone();
         let handle: JoinHandle<Result<()>> = tokio::spawn(async move {
             let mut sql_server_client = sql_server_pool.get().await.unwrap();
+            let start = 0;
+            let end = 1000;
             let mut sql_server_stream = sql_server_client
                 .query(
-                    "SELECT ID, FileNumber, Code FROM [Sample].[TestData1] WITH (NOLOCK);", // TODO
-                    &[],
+                    "SELECT ID, FileNumber, Code FROM [Sample].[TestData1] WITH (NOLOCK) WHERE ID BETWEEN @P1 AND @P1;", // TODO
+                    &[&start, &end],
                 )
                 .await
                 .unwrap();
@@ -146,32 +205,4 @@ async fn main() -> Result<()> {
     join_all(handles).await;
     let elapsed = now.elapsed();
     println!("Elapsed: {:.2?}", elapsed);
-    println!(
-        "{}",
-        "DONE COPY data from SQL Server to Postgres ...".green()
-    );
-    // endregion
-    print_separator();
-
-    Ok(())
-}
-
-fn adjust_number_of_threads(threads: &u32) -> u32 {
-    if *threads < MIN_THREADS {
-        return MIN_THREADS;
-    }
-    if *threads > MAX_THREADS {
-        return MAX_THREADS;
-    }
-    *threads
-}
-
-fn adjust_timeout(timeout: &u64) -> u64 {
-    if *timeout < MIN_TIMEOUT {
-        return MIN_TIMEOUT;
-    }
-    if *timeout > MAX_TIMEOUT {
-        return MAX_TIMEOUT;
-    }
-    *timeout
 }

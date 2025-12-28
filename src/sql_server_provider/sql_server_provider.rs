@@ -1,12 +1,12 @@
 use crate::config_provider::SourceDatabase;
+use crate::shared::pg_pump_column_type::PgPumpColumnType;
 use crate::version::PRODUCT_NAME;
 use anyhow::Result;
 use bb8::Pool;
 use bb8_tiberius::ConnectionManager;
-use futures::TryStreamExt;
-use futures::future::join_all;
-use tiberius::{AuthMethod, ColumnType, Config, EncryptionLevel, QueryItem};
-use tokio::task::JoinHandle;
+use tiberius::{AuthMethod, Client, ColumnType, Config, EncryptionLevel};
+use tokio::net::TcpStream;
+use tokio_util::compat::TokioAsyncReadCompatExt;
 
 pub struct SqlServerProvider {
     config: Config,
@@ -44,70 +44,68 @@ impl SqlServerProvider {
         Ok(pool)
     }
 
-    pub async fn sql_server_test(&self) -> Result<()> {
-        let manager = ConnectionManager::new(self.config.clone());
-        let pool = Pool::builder()
-            .max_size(8)
-            .connection_timeout(std::time::Duration::from_secs(10))
-            .build(manager)
+    pub async fn get_table_metadata(
+        &self,
+        schema_name: &str,
+        table_name: &str,
+    ) -> Result<Vec<(String, PgPumpColumnType)>> {
+        let tcp = TcpStream::connect(&self.config.get_addr()).await?;
+        tcp.set_nodelay(true)?;
+        let mut client = Client::connect(self.config.clone(), tcp.compat()).await?;
+        let get_metadata_query = format!(
+            "SELECT TOP 1 * FROM [{}].[{}] WITH (NOLOCK);",
+            schema_name, table_name
+        );
+        let first_row = client
+            .query(&get_metadata_query, &[])
+            .await?
+            .into_row()
             .await?;
-
-        let mut handles = Vec::new();
-        for i in 1..=2 {
-            let pool = pool.clone();
-            let handle: JoinHandle<()> = tokio::spawn(async move {
-                let mut client = pool.get().await.unwrap();
-                let mut stream = client
-                    .query(
-                        "SELECT TOP 1000 ID, FileNumber, Code FROM [Sample].[TestData1]",
-                        &[],
-                    )
-                    .await
-                    .unwrap();
-                while let Some(item) = stream.try_next().await.unwrap() {
-                    match item {
-                        QueryItem::Row(row) => {
-                            let id: i64 = row.get(0).expect("id not found or wrong type");
-                            let primary_file_row_number: i32 =
-                                row.get(1).expect("FileNumber not found or wrong type");
-                            let fund_code: &str = row.get(2).expect("Code not found or wrong type");
-
-                            println!(
-                                "i = {}, ID = {}, FileNumber = {}, Code = {}",
-                                i, id, primary_file_row_number, fund_code
-                            );
-                            // TODO:
-                            //let id: i32 = row.try_get::<i32, _>(0)?.expect("NULL id");
-                            //let name: &str = row.try_get::<&str, _>(1)?.expect("NULL name");
-                            //To read just the first row of the first result quickly, you can use into_row()
-                            // let row = client.query("SELECT @P1", &[&1i32]).await?
-                            //                 .into_row().await?
-                            //                 .unwrap();
-                            // assert_eq!(Some(1i32), row.get(0))
-                        }
-                        QueryItem::Metadata(_meta) => {
-                            //eprintln!("Error processing row: {}", e);
-                            for c in _meta.columns() {
-                                let ct = c.column_type();
-                                match ct {
-                                    ColumnType::Int4 => println!("{}: Column type: Int4", c.name()),
-                                    ColumnType::Int8 => println!("{}: Column type: Int8", c.name()),
-                                    ColumnType::BigVarChar => {
-                                        println!("{}: Column type: BigVarChar", c.name())
-                                    }
-                                    _ => println!("{}: Column type: Other", c.name()),
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-            handles.push(handle);
+        let mut result = Vec::new();
+        if let Some(row) = first_row {
+            for column in row.columns() {
+                let column_type = match column.column_type() {
+                    ColumnType::Bitn => PgPumpColumnType::Boolean,
+                    ColumnType::Int2 => PgPumpColumnType::Byte,
+                    ColumnType::Int4 => PgPumpColumnType::Int,
+                    ColumnType::Int8 => PgPumpColumnType::BigInt,
+                    ColumnType::Daten => PgPumpColumnType::Datetime,
+                    ColumnType::Timen => PgPumpColumnType::Datetime,
+                    ColumnType::Datetime2 => PgPumpColumnType::Datetime,
+                    ColumnType::Decimaln => PgPumpColumnType::Decimal,
+                    ColumnType::Float8 => PgPumpColumnType::Float,
+                    ColumnType::Guid => PgPumpColumnType::Uuid,
+                    ColumnType::NChar => PgPumpColumnType::Char,
+                    ColumnType::BigChar => PgPumpColumnType::Char,
+                    ColumnType::NVarchar => PgPumpColumnType::Varchar,
+                    ColumnType::BigVarChar => PgPumpColumnType::Varchar,
+                    _ => PgPumpColumnType::Unknown,
+                };
+                result.push((column.name().to_string(), column_type));
+            }
         }
 
-        //handle.await.expect("Task panicked");
-        join_all(handles).await;
+        Ok(result)
+    }
 
-        Ok(())
+    pub async fn get_long_count(&self, schema_name: &str, table_name: &str) -> Result<i64> {
+        let tcp = TcpStream::connect(&self.config.get_addr()).await?;
+        tcp.set_nodelay(true)?;
+        let mut client = Client::connect(self.config.clone(), tcp.compat()).await?;
+        let get_count_query = format!(
+            "SELECT COUNT_BIG(*) FROM [{}].[{}] WITH (NOLOCK);",
+            schema_name, table_name
+        );
+        let row = client
+            .query(&get_count_query, &[])
+            .await?
+            .into_row()
+            .await?;
+        let mut count: i64 = 0;
+        if let Some(row) = row {
+            count = row.get(0).unwrap_or(0);
+        }
+
+        Ok(count)
     }
 }

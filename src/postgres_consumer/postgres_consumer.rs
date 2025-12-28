@@ -1,5 +1,7 @@
 use crate::config_provider::TargetDatabase;
+use std::fmt::{Debug, Pointer};
 // ---
+use crate::shared::pg_pump_column_type::PgPumpColumnType;
 use anyhow::Result;
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
@@ -13,18 +15,31 @@ use tokio_postgres::{Client, Config, Error, GenericClient, NoTls};
 
 pub struct PostgresConsumer {
     config: Config,
+    connection_string: String,
 }
 
 impl PostgresConsumer {
     pub fn new(target_database: &TargetDatabase) -> Self {
+        let host = target_database.get_host_as_ref();
+        let port = target_database.get_port_as_ref().clone();
+        let dbname = target_database.get_database_as_ref();
+        let user = target_database.get_user_as_ref();
+        let password = target_database.get_password_as_ref();
         let mut config = Config::new();
-        config.host(target_database.get_host_as_ref());
-        config.port(target_database.get_port_as_ref().clone());
-        config.dbname(target_database.get_database_as_ref());
-        config.user(target_database.get_user_as_ref());
-        config.password(target_database.get_password_as_ref());
+        config.host(host);
+        config.port(port);
+        config.dbname(dbname);
+        config.user(user);
+        config.password(password);
         config.keepalives(true);
-        PostgresConsumer { config }
+        let connection_string = format!(
+            "host={} port={} dbname={} user={} password={}",
+            host, port, dbname, user, password
+        );
+        PostgresConsumer {
+            config,
+            connection_string,
+        }
     }
 
     pub async fn create_connection_pool(
@@ -39,6 +54,56 @@ impl PostgresConsumer {
             .build(manager)
             .await?;
         Ok(pool)
+    }
+
+    pub async fn get_table_metadata(
+        &self,
+        schema_name: &str,
+        table_name: &str,
+    ) -> Result<Vec<(String, PgPumpColumnType)>> {
+        let (client, connection) = tokio_postgres::connect(&self.connection_string, NoTls).await?;
+
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                eprintln!("connection error: {}", e);
+            }
+        });
+
+        let query = format!("SELECT * FROM \"{}\".\"{}\" LIMIT 1;", schema_name, table_name);
+
+        let rows = client.query(&query, &[]).await?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            let column_name: String = row.get(0);
+            let data_type: String = row.get(1);
+            
+            //row.columns()
+
+            // let pg_type = match data_type.as_str() {
+            //     "bigint" => PgPumpColumnType::BigInt,
+            //     "integer" => PgPumpColumnType::Integer,
+            //     "smallint" => PgPumpColumnType::SmallInt,
+            //     "character varying" | "varchar" | "text" => PgPumpColumnType::Varchar,
+            //     "boolean" => PgPumpColumnType::Boolean,
+            //     "timestamp without time zone" => PgPumpColumnType::Timestamp,
+            //     "timestamp with time zone" => PgPumpColumnType::TimestampTz,
+            //     "date" => PgPumpColumnType::Date,
+            //     "numeric" | "decimal" => PgPumpColumnType::Numeric,
+            //     "real" => PgPumpColumnType::Real,
+            //     "double precision" => PgPumpColumnType::DoublePrecision,
+            //     _ => PgPumpColumnType::Varchar, // Default fallback
+            // };
+
+            result.push((column_name,PgPumpColumnType::Unknown));
+        }
+
+        Ok(result)
+    }
+
+    pub async fn get_long_count(&self, schema_name: &str, table_name: &str) -> Result<i64> {
+        // TODO: Implement actual count retrieval
+        Ok(0i64)
     }
 
     pub async fn postgres_copy_test(&self) -> Result<()> {
@@ -76,45 +141,5 @@ impl PostgresConsumer {
         Ok(())
     }
 
-    pub async fn postgres_pool_test(&self) -> Result<()> {
-        let manager = PostgresConnectionManager::new(self.config.clone(), NoTls);
-        let pool = Pool::builder()
-            .max_size(10)
-            .connection_timeout(std::time::Duration::from_secs(10))
-            .build(manager)
-            .await?;
 
-        let mut handles = Vec::new();
-        for task_id in 1..=10 {
-            let pool = pool.clone();
-            let handle: JoinHandle<Result<()>> = tokio::spawn(async move {
-                let connection = pool.get().await?;
-                let client = connection.client();
-
-                let sink = client
-                    .copy_in("COPY \"Sample\".\"TestData1\" (\"ID\", \"FileNumber\", \"Code\") FROM STDIN BINARY")
-                    .await?;
-
-                let mut writer = pin!(BinaryCopyInWriter::new(
-                    sink,
-                    &[Type::INT8, Type::INT4, Type::VARCHAR]
-                ));
-
-                for i in 0..100_000i64 {
-                    writer
-                        .as_mut()
-                        .write(&[&i, &task_id, &format!("the value for {i}")])
-                        .await?;
-                }
-
-                writer.finish().await?;
-                Ok(())
-            });
-            handles.push(handle);
-        }
-
-        join_all(handles).await;
-
-        Ok(())
-    }
 }
