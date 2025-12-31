@@ -1,6 +1,4 @@
-use clap::Parser;
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub enum PgPumpColumnType {
     Boolean,
     Byte,

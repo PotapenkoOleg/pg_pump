@@ -11,6 +11,7 @@ use crate::config_provider::ConfigProvider;
 use crate::helpers::{print_banner, print_separator};
 use crate::postgres_consumer::postgres_consumer::PostgresConsumer;
 use crate::shared::pg_pump_column_type::PgPumpColumnType;
+use crate::shared::postgres_column_types::get_postgres_column_type;
 use crate::sql_server_provider::sql_server_provider::SqlServerProvider;
 use anyhow::Result;
 use bb8::Pool;
@@ -26,13 +27,13 @@ use tiberius::{ColumnType, QueryItem};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tokio_postgres::binary_copy::BinaryCopyInWriter;
-use tokio_postgres::types::Type;
+use tokio_postgres::types::{ToSql, Type};
 use tokio_postgres::{GenericClient, NoTls};
 
-const MIN_THREADS: u32 = 10;
+const MIN_THREADS: u32 = 1;
 const MAX_THREADS: u32 = 100;
 const MIN_TIMEOUT: u64 = 3;
-const MAX_TIMEOUT: u64 = 600;
+const MAX_TIMEOUT: u64 = 1200;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -72,6 +73,26 @@ async fn main() -> Result<()> {
     // region SQL Server Metadata
     println!("Getting SQL Server metadata ...");
     let sql_server_provider = SqlServerProvider::new(&config.get_source_database_as_ref());
+    let long_count = sql_server_provider
+        .get_long_count(&source_schema_name, &source_table_name)
+        .await;
+
+    if long_count.is_err() {
+        eprintln!("{}", long_count.err().unwrap().to_string().red());
+        process::exit(1);
+    }
+    let long_count = long_count.ok().unwrap();
+    if long_count == 0 {
+        println!(
+            "{}",
+            format!(
+                "ATTEMPT TO COPY EMPTY TABLE {}.{}. Exiting...",
+                &source_schema_name, &source_table_name
+            )
+            .red()
+        );
+        process::exit(0);
+    }
     let sql_server_metadata_result = sql_server_provider
         .get_table_metadata(&source_schema_name, &source_table_name)
         .await;
@@ -186,6 +207,10 @@ async fn copy_data(
         .map(|x| format!("[{}]", x.0.clone()))
         .collect::<Vec<String>>()
         .join(", ");
+    let postgres_column_types = sql_server_metadata
+        .iter()
+        .map(|x| get_postgres_column_type(&x.1))
+        .collect::<Vec<Type>>();
     let postgres_columns = sql_server_metadata
         .iter()
         .map(|x| format!("\"{}\"", x.0.clone()))
@@ -193,6 +218,7 @@ async fn copy_data(
         .join(", ");
     for thread_id in 0..threads.clone() {
         let sql_server_pool = sql_server_pool.clone();
+        let postgres_column_types = postgres_column_types.clone();
         let postgres_pool = postgres_pool.clone();
         let source_schema_name = source_schema_name.clone();
         let source_table_name = source_table_name.clone();
@@ -226,19 +252,55 @@ async fn copy_data(
             let postgres_sink = postgres_client.copy_in(&postgres_sink_query).await?;
             let mut postgres_writer = pin!(BinaryCopyInWriter::new(
                 postgres_sink,
-                &[Type::INT8, Type::INT4, Type::VARCHAR] // TODO:
+                &postgres_column_types[..]
             ));
             let mut count = 0u64;
+            let mut data_row_boxed: Vec<Box<(dyn ToSql + Sync)>> =
+                Vec::with_capacity(postgres_column_types.len());
             while let Some(item) = sql_server_stream.try_next().await.unwrap() {
+                data_row_boxed.clear();
                 match item {
                     QueryItem::Row(row) => {
-                        let id: i64 = row.try_get::<i64, _>(0)?.expect("NULL id");
-                        let file_number: i32 = row.try_get::<i32, _>(1)?.expect("NULL file_number");
-                        let code: &str = row.try_get::<&str, _>(2)?.expect("NULL code");
-                        //println!("i = {}, ID = {}, FN = {}, C = {}", i, id, file_number, code);
+                        for (index, column) in row.columns().iter().enumerate() {
+                            match column.column_type() {
+                                // ColumnType::Bitn => PgPumpColumnType::Boolean,
+                                // ColumnType::Int2 => PgPumpColumnType::Byte,
+                                ColumnType::Int4 => {
+                                    let t_int: i32 =
+                                        row.try_get::<i32, _>(index)?.expect("NULL  t_int");
+                                    data_row_boxed.push(Box::new(t_int));
+                                    continue;
+                                }
+                                ColumnType::Int8 => {
+                                    let t_bigint: i64 =
+                                        row.try_get::<i64, _>(index)?.expect("NULL t_bigint");
+                                    data_row_boxed.push(Box::new(t_bigint));
+                                    continue;
+                                }
+                                // ColumnType::Daten => PgPumpColumnType::Datetime,
+                                // ColumnType::Timen => PgPumpColumnType::Datetime,
+                                // ColumnType::Datetime2 => PgPumpColumnType::Datetime,
+                                // ColumnType::Decimaln => PgPumpColumnType::Decimal,
+                                // ColumnType::Float8 => PgPumpColumnType::Float,
+                                // ColumnType::Guid => PgPumpColumnType::Uuid,
+                                // ColumnType::NChar => PgPumpColumnType::Char,
+                                // ColumnType::BigChar => PgPumpColumnType::Char,
+                                // ColumnType::NVarchar => PgPumpColumnType::Varchar,
+                                ColumnType::BigVarChar => {
+                                    let t_bigvarchar: &str =
+                                        row.try_get::<&str, _>(index)?.expect("NULL t_bigvarchar");
+                                    data_row_boxed.push(Box::new(t_bigvarchar));
+                                    continue;
+                                }
+                                _ => {}
+                            }
+                        }
+
+
                         postgres_writer
                             .as_mut()
-                            .write(&[&id, &file_number, &code])
+                            //.write_raw()
+                            .write(&data_row_boxed[..])
                             .await?;
                     }
                     _ => {}

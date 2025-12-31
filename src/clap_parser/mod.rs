@@ -25,13 +25,13 @@ pub struct Args {
     #[arg(long, short = 's', default_value = "Sample")] // TODO: remove default value
     pub source_schema: String,
 
-    #[arg(long, short = 't', default_value = "TestData1")] // TODO: remove default value
+    #[arg(long, short = 't', default_value = "AllTypes")] // TODO: remove default value
     pub source_table: String,
 
     #[arg(long, short = 'S', default_value = "Sample")] // TODO: remove default value
     pub target_schema: String,
 
-    #[arg(long, short = 'T', default_value = "TestData1")] // TODO: remove default value
+    #[arg(long, short = 'T', default_value = "AllTypes")] // TODO: remove default value
     pub target_table: String,
 
     #[arg(long, short = 'C', default_value = "ID")] // TODO: remove default value
