@@ -45,10 +45,14 @@ async fn main() -> Result<()> {
     println!("Threads: <{}>", threads);
     let timeout = adjust_timeout(&args.timeout);
     println!("Timeout: <{}> seconds", timeout);
-    let table_name = args.table.clone();
-    println!("Table name: <{}>", &table_name);
-    let schema_name = args.schema.clone();
-    println!("Schema name: <{}>", &schema_name);
+    let source_schema_name = args.source_schema.clone();
+    println!("Source schema name: <{}>", &source_schema_name);
+    let source_table_name = args.source_table.clone();
+    println!("Source table name: <{}>", &source_table_name);
+    let target_schema_name = args.target_schema.clone();
+    println!("Target schema name: <{}>", &target_schema_name);
+    let target_table_name = args.target_table.clone();
+    println!("Target table name: <{}>", &target_table_name);
     let column_name = args.column.clone();
     println!("Column name: <{}>", &column_name);
     // endregion
@@ -69,7 +73,7 @@ async fn main() -> Result<()> {
     println!("Getting SQL Server metadata ...");
     let sql_server_provider = SqlServerProvider::new(&config.get_source_database_as_ref());
     let sql_server_metadata_result = sql_server_provider
-        .get_table_metadata(&schema_name, &table_name)
+        .get_table_metadata(&source_schema_name, &source_table_name)
         .await;
     if sql_server_metadata_result.is_err() {
         eprintln!(
@@ -127,9 +131,11 @@ async fn main() -> Result<()> {
         sql_server_pool,
         postgres_pool,
         sql_server_metadata,
-        &schema_name,
-        &table_name,
-        &column_name
+        &source_schema_name,
+        &source_table_name,
+        &target_schema_name,
+        &target_table_name,
+        &column_name,
     )
     .await;
     println!(
@@ -167,15 +173,17 @@ async fn copy_data(
     sql_server_pool: Pool<ConnectionManager>,
     postgres_pool: Pool<PostgresConnectionManager<NoTls>>,
     sql_server_metadata: Vec<(String, PgPumpColumnType)>,
-    schema_name: &String,
-    table_name: &String,
-    column_name: &String
+    source_schema_name: &String,
+    source_table_name: &String,
+    target_schema_name: &String,
+    target_table_name: &String,
+    column_name: &String,
 ) {
     let now = Instant::now();
     let mut handles = Vec::new();
     let sql_server_columns = sql_server_metadata
         .iter()
-        .map(|x| format!("[{}]",x.0.clone()))
+        .map(|x| format!("[{}]", x.0.clone()))
         .collect::<Vec<String>>()
         .join(", ");
     let postgres_columns = sql_server_metadata
@@ -186,18 +194,19 @@ async fn copy_data(
     for thread_id in 0..threads.clone() {
         let sql_server_pool = sql_server_pool.clone();
         let postgres_pool = postgres_pool.clone();
-        let schema_name = schema_name.clone();
-        let table_name = table_name.clone();
+        let source_schema_name = source_schema_name.clone();
+        let source_table_name = source_table_name.clone();
+        let target_schema_name = target_schema_name.clone();
+        let target_table_name = target_table_name.clone();
         let sql_server_columns = sql_server_columns.clone();
         let postgres_columns = postgres_columns.clone();
         let column_name = column_name.clone();
-
 
         let handle: JoinHandle<Result<()>> = tokio::spawn(async move {
             let mut sql_server_client = sql_server_pool.get().await.unwrap();
             let sql_server_stream_query = format!(
                 "SELECT {} FROM [{}].[{}] WITH (NOLOCK) WHERE {} BETWEEN @P1 AND @P2;",
-                sql_server_columns, schema_name, table_name, column_name
+                sql_server_columns, source_schema_name, source_table_name, column_name
             );
             let start = 0i64; // TODO:
             let end = 10i64;
@@ -212,7 +221,7 @@ async fn copy_data(
 
             let postgres_sink_query = format!(
                 "COPY \"{}\".\"{}\" ({}) FROM STDIN BINARY;",
-                schema_name, table_name, postgres_columns,
+                target_schema_name, target_table_name, postgres_columns,
             );
             let postgres_sink = postgres_client.copy_in(&postgres_sink_query).await?;
             let mut postgres_writer = pin!(BinaryCopyInWriter::new(
