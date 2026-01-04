@@ -18,7 +18,7 @@ tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-time-0_3"] 
 futures-util = "0.3"
 bb8-postgres = "0.9"
 dotenvy = "0.15"
-rust_decimal = { version = "1.39.0", features = ["macros"] }
+rust_decimal = { version = "1.39.0", features = ["db-tokio-postgres"] }
 uuid = { version = "1.19", features = ["v4", "serde"] }
 time = "0.3.44"
 

@@ -29,9 +29,8 @@ use time::{Date, PrimitiveDateTime, Time};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tokio_postgres::binary_copy::BinaryCopyInWriter;
-use tokio_postgres::types::{IsNull, ToSql, Type, to_sql_checked};
+use tokio_postgres::types::{ToSql, Type};
 use tokio_postgres::{GenericClient, NoTls};
-use tokio_util::bytes;
 use uuid::Uuid;
 
 const MIN_THREADS: u32 = 1;
@@ -291,23 +290,21 @@ async fn copy_data(
                                     continue;
                                 }
                                 ColumnType::Daten => {
-                                    // TODO
                                     let t_date: Date =
                                         row.try_get::<Date, _>(index)?.expect("NULL t_date");
                                     data_row_boxed.push(Box::new(t_date));
                                     continue;
                                 }
                                 ColumnType::Timen => {
-                                    // TODO:
                                     let t_time: Time =
                                         row.try_get::<Time, _>(index)?.expect("NULL t_time");
                                     data_row_boxed.push(Box::new(t_time));
                                     continue;
                                 }
                                 ColumnType::Datetime2 => {
-                                    // TODO
-                                    let t_date_time_2: PrimitiveDateTime =
-                                        row.try_get::<PrimitiveDateTime, _>(index)?.expect("NULL t_primitive_date_time");
+                                    let t_date_time_2: PrimitiveDateTime = row
+                                        .try_get::<PrimitiveDateTime, _>(index)?
+                                        .expect("NULL t_primitive_date_time");
                                     data_row_boxed.push(Box::new(t_date_time_2));
                                     continue;
                                 }
@@ -315,7 +312,7 @@ async fn copy_data(
                                     // TODO:
                                     let t_decimal: Decimal =
                                         row.try_get::<Decimal, _>(index)?.expect("NULL t_decimal");
-                                    data_row_boxed.push(Box::new(PgDecimal(t_decimal)));
+                                    data_row_boxed.push(Box::new(t_decimal));
                                     continue;
                                 }
                                 ColumnType::Float8 => {
@@ -363,7 +360,7 @@ async fn copy_data(
                             .map(|s| s.as_ref() as &(dyn ToSql + Sync))
                             .collect();
 
-                        postgres_writer.as_mut().write(&row_to_write[..]).await.expect("TODO: panic message");
+                        postgres_writer.as_mut().write(&row_to_write[..]).await?
                     }
                     _ => {}
                 }
@@ -391,40 +388,3 @@ async fn copy_data(
     let elapsed = now.elapsed();
     println!("Elapsed: {:.2?}", elapsed);
 }
-
-#[derive(Debug)]
-struct PgDecimal(Decimal);
-
-impl ToSql for PgDecimal {
-    fn to_sql(
-        &self,
-        ty: &Type,
-        out: &mut bytes::BytesMut,
-    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>> {
-        let numeric_str = self.0.to_string();
-        numeric_str.to_sql(ty, out)
-    }
-
-    fn accepts(ty: &Type) -> bool {
-        matches!(*ty, Type::NUMERIC)
-    }
-
-    to_sql_checked!();
-}
-
-// #[derive(Debug)]
-// struct PgDate(Date);
-//
-// impl ToSql for PgDate {
-//     fn to_sql(&self, ty: &Type, out: &mut bytes::BytesMut) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>> {
-//         // PostgreSQL's binary format for DATE is days since 2000-01-01.
-//         // Converting to string is a reliable way to delegate the encoding to tokio_postgres.
-//         self.0.to_string().to_sql(ty, out)
-//     }
-//
-//     fn accepts(ty: &Type) -> bool {
-//         matches!(*ty, Type::DATE)
-//     }
-//
-//     to_sql_checked!();
-// }

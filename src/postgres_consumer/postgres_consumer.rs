@@ -1,17 +1,9 @@
 use crate::config_provider::TargetDatabase;
-use std::fmt::{Debug, Pointer};
-// ---
 use crate::shared::pg_pump_column_type::PgPumpColumnType;
 use anyhow::Result;
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
-use futures_util::TryStreamExt;
-use futures_util::future::join_all;
-use std::pin::pin;
-use tokio::task::JoinHandle;
-use tokio_postgres::binary_copy::BinaryCopyInWriter;
-use tokio_postgres::types::Type;
-use tokio_postgres::{Client, Config, Error, GenericClient, NoTls};
+use tokio_postgres::{Config, NoTls};
 
 pub struct PostgresConsumer {
     config: Config,
@@ -69,7 +61,10 @@ impl PostgresConsumer {
             }
         });
 
-        let query = format!("SELECT * FROM \"{}\".\"{}\" LIMIT 1;", schema_name, table_name);
+        let query = format!(
+            "SELECT * FROM \"{}\".\"{}\" LIMIT 1;",
+            schema_name, table_name
+        );
 
         let rows = client.query(&query, &[]).await?;
 
@@ -77,7 +72,7 @@ impl PostgresConsumer {
         for row in rows {
             let column_name: String = row.get(0);
             let data_type: String = row.get(1);
-            
+
             //row.columns()
 
             // let pg_type = match data_type.as_str() {
@@ -95,7 +90,7 @@ impl PostgresConsumer {
             //     _ => PgPumpColumnType::Varchar, // Default fallback
             // };
 
-            result.push((column_name,PgPumpColumnType::Unknown));
+            result.push((column_name, PgPumpColumnType::Unknown));
         }
 
         Ok(result)
@@ -105,41 +100,4 @@ impl PostgresConsumer {
         // TODO: Implement actual count retrieval
         Ok(0i64)
     }
-
-    pub async fn postgres_copy_test(&self) -> Result<()> {
-        let (client, connection) = tokio_postgres::connect(
-            "host=localhost user=postgres password=postgres dbname=developer",
-            NoTls,
-        )
-        .await?;
-
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                eprintln!("connection error: {}", e);
-            }
-        });
-
-        let sink = client
-            .copy_in("COPY \"Sample\".\"TestData1\" (\"ID\", \"FileNumber\", \"Code\") FROM STDIN BINARY")
-            .await?;
-
-        let mut writer = pin!(BinaryCopyInWriter::new(
-            sink,
-            &[Type::INT8, Type::INT4, Type::VARCHAR]
-        ));
-
-        for i in 0..1_000_000i64 {
-            writer
-                .as_mut()
-                .write(&[&i, &0i32, &format!("the value for {i}")])
-                .await?;
-        }
-
-        writer.finish().await?;
-        println!("Successfully inserted 1,000,000 rows via binary copy.");
-
-        Ok(())
-    }
-
-
 }
