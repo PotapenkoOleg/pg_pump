@@ -363,7 +363,7 @@ async fn copy_data(
                             .map(|s| s.as_ref() as &(dyn ToSql + Sync))
                             .collect();
 
-                        postgres_writer.as_mut().write(&row_to_write[..]).await?;
+                        postgres_writer.as_mut().write(&row_to_write[..]).await.expect("TODO: panic message");
                     }
                     _ => {}
                 }
