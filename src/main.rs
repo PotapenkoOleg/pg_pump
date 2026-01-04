@@ -6,6 +6,7 @@ mod shared;
 mod sql_server_provider;
 mod version;
 
+use std::ops::Deref;
 use crate::clap_parser::Args;
 use crate::config_provider::ConfigProvider;
 use crate::helpers::{print_banner, print_separator};
@@ -255,12 +256,20 @@ async fn copy_data(
                 &postgres_column_types[..]
             ));
             let mut count = 0u64;
-            let mut data_row_boxed: Vec<Box<(dyn ToSql + Sync)>> =
+
+
+            let mut data_row_boxed:Vec<Box<(dyn ToSql + Send + Sync)>> =
                 Vec::with_capacity(postgres_column_types.len());
+
+
             while let Some(item) = sql_server_stream.try_next().await.unwrap() {
+                // let mut data_row: Vec<&(dyn ToSql + Sync)> =
+                //     Vec::with_capacity(postgres_column_types.len());
+
                 data_row_boxed.clear();
                 match item {
                     QueryItem::Row(row) => {
+
                         for (index, column) in row.columns().iter().enumerate() {
                             match column.column_type() {
                                 // ColumnType::Bitn => PgPumpColumnType::Boolean,
@@ -269,12 +278,14 @@ async fn copy_data(
                                     let t_int: i32 =
                                         row.try_get::<i32, _>(index)?.expect("NULL  t_int");
                                     data_row_boxed.push(Box::new(t_int));
+                                    //data_row.push(data_row_boxed.last().unwrap().deref());
                                     continue;
                                 }
                                 ColumnType::Int8 => {
                                     let t_bigint: i64 =
                                         row.try_get::<i64, _>(index)?.expect("NULL t_bigint");
                                     data_row_boxed.push(Box::new(t_bigint));
+                                    //data_row.push(data_row_boxed.last().unwrap().deref());
                                     continue;
                                 }
                                 // ColumnType::Daten => PgPumpColumnType::Datetime,
@@ -288,20 +299,25 @@ async fn copy_data(
                                 // ColumnType::NVarchar => PgPumpColumnType::Varchar,
                                 ColumnType::BigVarChar => {
                                     let t_bigvarchar: &str =
-                                        row.try_get::<&str, _>(index)?.expect("NULL t_bigvarchar");
-                                    data_row_boxed.push(Box::new(t_bigvarchar));
+                                       row.try_get::<&str, _>(index)?.expect("NULL t_bigvarchar");
+                                    let x = t_bigvarchar.to_string();
+                                    //data_row_boxed.push(Box::new(t_bigvarchar));
+                                    //data_row.push(data_row_boxed.last().unwrap().deref());
                                     continue;
                                 }
                                 _ => {}
                             }
                         }
 
+                        let row_to_write: Vec<&(dyn ToSql + Sync)> = data_row_boxed
+                            .iter()
+                            .map(|s| s.as_ref() as &(dyn ToSql + Sync))
+                            .collect();
+
 
                         postgres_writer
                             .as_mut()
-                            //.write_raw()
-                            .write(&data_row_boxed[..])
-                            .await?;
+                            .write(&row_to_write[..]).await?;
                     }
                     _ => {}
                 }
