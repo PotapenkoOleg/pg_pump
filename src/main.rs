@@ -6,7 +6,6 @@ mod shared;
 mod sql_server_provider;
 mod version;
 
-use std::ops::Deref;
 use crate::clap_parser::Args;
 use crate::config_provider::ConfigProvider;
 use crate::helpers::{print_banner, print_separator};
@@ -22,14 +21,18 @@ use clap::Parser;
 use colored::Colorize;
 use futures_util::TryStreamExt;
 use futures_util::future::join_all;
+use rust_decimal::prelude::*;
 use std::pin::pin;
 use std::process;
 use tiberius::{ColumnType, QueryItem};
+use time::{Date, PrimitiveDateTime, Time};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tokio_postgres::binary_copy::BinaryCopyInWriter;
-use tokio_postgres::types::{ToSql, Type};
+use tokio_postgres::types::{IsNull, ToSql, Type, to_sql_checked};
 use tokio_postgres::{GenericClient, NoTls};
+use tokio_util::bytes;
+use uuid::Uuid;
 
 const MIN_THREADS: u32 = 1;
 const MAX_THREADS: u32 = 100;
@@ -77,7 +80,6 @@ async fn main() -> Result<()> {
     let long_count = sql_server_provider
         .get_long_count(&source_schema_name, &source_table_name)
         .await;
-
     if long_count.is_err() {
         eprintln!("{}", long_count.err().unwrap().to_string().red());
         process::exit(1);
@@ -256,17 +258,26 @@ async fn copy_data(
                 &postgres_column_types[..]
             ));
             let mut count = 0u64;
-            let mut data_row_boxed:Vec<Box<(dyn ToSql + Send + Sync)>> =
+            let mut data_row_boxed: Vec<Box<dyn ToSql + Send + Sync>> =
                 Vec::with_capacity(postgres_column_types.len());
             while let Some(item) = sql_server_stream.try_next().await.unwrap() {
                 data_row_boxed.clear();
                 match item {
                     QueryItem::Row(row) => {
-
                         for (index, column) in row.columns().iter().enumerate() {
                             match column.column_type() {
-                                // ColumnType::Bitn => PgPumpColumnType::Boolean,
-                                // ColumnType::Int2 => PgPumpColumnType::Byte,
+                                ColumnType::Bitn => {
+                                    let t_boolean: bool =
+                                        row.try_get::<bool, _>(index)?.expect("NULL t_boolean");
+                                    data_row_boxed.push(Box::new(t_boolean));
+                                    continue;
+                                }
+                                ColumnType::Int2 => {
+                                    let t_small_int: i16 =
+                                        row.try_get::<i16, _>(index)?.expect("NULL  t_small_int");
+                                    data_row_boxed.push(Box::new(t_small_int));
+                                    continue;
+                                }
                                 ColumnType::Int4 => {
                                     let t_int: i32 =
                                         row.try_get::<i32, _>(index)?.expect("NULL  t_int");
@@ -274,24 +285,73 @@ async fn copy_data(
                                     continue;
                                 }
                                 ColumnType::Int8 => {
-                                    let t_bigint: i64 =
-                                        row.try_get::<i64, _>(index)?.expect("NULL t_bigint");
-                                    data_row_boxed.push(Box::new(t_bigint));
+                                    let t_big_int: i64 =
+                                        row.try_get::<i64, _>(index)?.expect("NULL t_big_int");
+                                    data_row_boxed.push(Box::new(t_big_int));
                                     continue;
                                 }
-                                // ColumnType::Daten => PgPumpColumnType::Datetime,
-                                // ColumnType::Timen => PgPumpColumnType::Datetime,
-                                // ColumnType::Datetime2 => PgPumpColumnType::Datetime,
-                                // ColumnType::Decimaln => PgPumpColumnType::Decimal,
-                                // ColumnType::Float8 => PgPumpColumnType::Float,
-                                // ColumnType::Guid => PgPumpColumnType::Uuid,
-                                // ColumnType::NChar => PgPumpColumnType::Char,
-                                // ColumnType::BigChar => PgPumpColumnType::Char,
-                                // ColumnType::NVarchar => PgPumpColumnType::Varchar,
+                                ColumnType::Daten => {
+                                    // TODO
+                                    let t_date: Date =
+                                        row.try_get::<Date, _>(index)?.expect("NULL t_date");
+                                    data_row_boxed.push(Box::new(t_date));
+                                    continue;
+                                }
+                                ColumnType::Timen => {
+                                    // TODO:
+                                    let t_time: Time =
+                                        row.try_get::<Time, _>(index)?.expect("NULL t_time");
+                                    data_row_boxed.push(Box::new(t_time));
+                                    continue;
+                                }
+                                ColumnType::Datetime2 => {
+                                    // TODO
+                                    let t_date_time_2: PrimitiveDateTime =
+                                        row.try_get::<PrimitiveDateTime, _>(index)?.expect("NULL t_primitive_date_time");
+                                    data_row_boxed.push(Box::new(t_date_time_2));
+                                    continue;
+                                }
+                                ColumnType::Decimaln => {
+                                    // TODO:
+                                    let t_decimal: Decimal =
+                                        row.try_get::<Decimal, _>(index)?.expect("NULL t_decimal");
+                                    data_row_boxed.push(Box::new(PgDecimal(t_decimal)));
+                                    continue;
+                                }
+                                ColumnType::Float8 => {
+                                    let t_float: f64 =
+                                        row.try_get::<f64, _>(index)?.expect("NULL t_float");
+                                    data_row_boxed.push(Box::new(t_float));
+                                    continue;
+                                }
+                                ColumnType::Guid => {
+                                    let t_uuid: Uuid =
+                                        row.try_get::<Uuid, _>(index)?.expect("NULL t_uuid");
+                                    data_row_boxed.push(Box::new(t_uuid));
+                                    continue;
+                                }
+                                ColumnType::NChar => {
+                                    let t_n_char: &str =
+                                        row.try_get::<&str, _>(index)?.expect("NULL t_n_char");
+                                    data_row_boxed.push(Box::new(t_n_char.to_string()));
+                                    continue;
+                                }
+                                ColumnType::BigChar => {
+                                    let t_big_char: &str =
+                                        row.try_get::<&str, _>(index)?.expect("NULL t_big_char");
+                                    data_row_boxed.push(Box::new(t_big_char.to_string()));
+                                    continue;
+                                }
+                                ColumnType::NVarchar => {
+                                    let t_n_varchar: &str =
+                                        row.try_get::<&str, _>(index)?.expect("NULL t_n_varchar");
+                                    data_row_boxed.push(Box::new(t_n_varchar.to_string()));
+                                    continue;
+                                }
                                 ColumnType::BigVarChar => {
-                                    let t_bigvarchar: &str =
-                                       row.try_get::<&str, _>(index)?.expect("NULL t_bigvarchar");
-                                    data_row_boxed.push(Box::new(t_bigvarchar.to_string()));
+                                    let t_big_varchar: &str =
+                                        row.try_get::<&str, _>(index)?.expect("NULL t_big_varchar");
+                                    data_row_boxed.push(Box::new(t_big_varchar.to_string()));
                                     continue;
                                 }
                                 _ => {}
@@ -303,9 +363,7 @@ async fn copy_data(
                             .map(|s| s.as_ref() as &(dyn ToSql + Sync))
                             .collect();
 
-                        postgres_writer
-                            .as_mut()
-                            .write(&row_to_write[..]).await?;
+                        postgres_writer.as_mut().write(&row_to_write[..]).await?;
                     }
                     _ => {}
                 }
@@ -320,8 +378,53 @@ async fn copy_data(
         });
         handles.push(handle);
     }
-    let x = join_all(handles).await;
+    let thread_results = join_all(handles).await;
+    for thread_result in thread_results {
+        if thread_result.is_err() {
+            eprintln!(
+                "Error in thread: {}",
+                thread_result.err().unwrap().to_string().red()
+            );
+        }
+    }
 
     let elapsed = now.elapsed();
     println!("Elapsed: {:.2?}", elapsed);
 }
+
+#[derive(Debug)]
+struct PgDecimal(Decimal);
+
+impl ToSql for PgDecimal {
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut bytes::BytesMut,
+    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>> {
+        let numeric_str = self.0.to_string();
+        numeric_str.to_sql(ty, out)
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::NUMERIC)
+    }
+
+    to_sql_checked!();
+}
+
+// #[derive(Debug)]
+// struct PgDate(Date);
+//
+// impl ToSql for PgDate {
+//     fn to_sql(&self, ty: &Type, out: &mut bytes::BytesMut) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>> {
+//         // PostgreSQL's binary format for DATE is days since 2000-01-01.
+//         // Converting to string is a reliable way to delegate the encoding to tokio_postgres.
+//         self.0.to_string().to_sql(ty, out)
+//     }
+//
+//     fn accepts(ty: &Type) -> bool {
+//         matches!(*ty, Type::DATE)
+//     }
+//
+//     to_sql_checked!();
+// }
