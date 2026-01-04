@@ -266,92 +266,102 @@ async fn copy_data(
                         for (index, column) in row.columns().iter().enumerate() {
                             match column.column_type() {
                                 ColumnType::Bitn => {
-                                    let t_boolean: bool =
-                                        row.try_get::<bool, _>(index)?.expect("NULL t_boolean");
+                                    let t_boolean: Option<bool> = row.try_get::<bool, _>(index)?;
                                     data_row_boxed.push(Box::new(t_boolean));
                                     continue;
                                 }
                                 ColumnType::Int2 => {
-                                    let t_small_int: i16 =
-                                        row.try_get::<i16, _>(index)?.expect("NULL  t_small_int");
+                                    let t_small_int: Option<i16> = row.try_get::<i16, _>(index)?;
                                     data_row_boxed.push(Box::new(t_small_int));
                                     continue;
                                 }
                                 ColumnType::Int4 => {
-                                    let t_int: i32 =
-                                        row.try_get::<i32, _>(index)?.expect("NULL  t_int");
-                                    data_row_boxed.push(Box::new(t_int));
+                                    let t_int_opt: Option<i32> = row.try_get::<i32, _>(index)?;
+                                    data_row_boxed.push(Box::new(t_int_opt));
                                     continue;
                                 }
                                 ColumnType::Int8 => {
-                                    let t_big_int: i64 =
-                                        row.try_get::<i64, _>(index)?.expect("NULL t_big_int");
+                                    let t_big_int: Option<i64> = row.try_get::<i64, _>(index)?;
                                     data_row_boxed.push(Box::new(t_big_int));
                                     continue;
                                 }
                                 ColumnType::Daten => {
-                                    let t_date: Date =
-                                        row.try_get::<Date, _>(index)?.expect("NULL t_date");
+                                    let t_date: Option<Date> = row.try_get::<Date, _>(index)?;
                                     data_row_boxed.push(Box::new(t_date));
                                     continue;
                                 }
                                 ColumnType::Timen => {
-                                    let t_time: Time =
-                                        row.try_get::<Time, _>(index)?.expect("NULL t_time");
+                                    let t_time: Option<Time> = row.try_get::<Time, _>(index)?;
                                     data_row_boxed.push(Box::new(t_time));
                                     continue;
                                 }
                                 ColumnType::Datetime2 => {
-                                    let t_date_time_2: PrimitiveDateTime = row
-                                        .try_get::<PrimitiveDateTime, _>(index)?
-                                        .expect("NULL t_primitive_date_time");
+                                    let t_date_time_2: Option<PrimitiveDateTime> =
+                                        row.try_get::<PrimitiveDateTime, _>(index)?;
                                     data_row_boxed.push(Box::new(t_date_time_2));
                                     continue;
                                 }
                                 ColumnType::Decimaln => {
-                                    // TODO:
-                                    let t_decimal: Decimal =
-                                        row.try_get::<Decimal, _>(index)?.expect("NULL t_decimal");
+                                    let t_decimal: Option<Decimal> =
+                                        row.try_get::<Decimal, _>(index)?;
                                     data_row_boxed.push(Box::new(t_decimal));
                                     continue;
                                 }
                                 ColumnType::Float8 => {
-                                    let t_float: f64 =
-                                        row.try_get::<f64, _>(index)?.expect("NULL t_float");
+                                    let t_float: Option<f64> = row.try_get::<f64, _>(index)?;
                                     data_row_boxed.push(Box::new(t_float));
                                     continue;
                                 }
                                 ColumnType::Guid => {
-                                    let t_uuid: Uuid =
-                                        row.try_get::<Uuid, _>(index)?.expect("NULL t_uuid");
+                                    let t_uuid: Option<Uuid> = row.try_get::<Uuid, _>(index)?;
                                     data_row_boxed.push(Box::new(t_uuid));
                                     continue;
                                 }
                                 ColumnType::NChar => {
-                                    let t_n_char: &str =
-                                        row.try_get::<&str, _>(index)?.expect("NULL t_n_char");
-                                    data_row_boxed.push(Box::new(t_n_char.to_string()));
+                                    let t_n_char: Option<&str> = row.try_get::<&str, _>(index)?;
+                                    match t_n_char {
+                                        Some(value) => {
+                                            data_row_boxed.push(Box::new(value.to_string()))
+                                        }
+                                        None => data_row_boxed.push(Box::new(None::<&str>)),
+                                    }
                                     continue;
                                 }
                                 ColumnType::BigChar => {
-                                    let t_big_char: &str =
-                                        row.try_get::<&str, _>(index)?.expect("NULL t_big_char");
-                                    data_row_boxed.push(Box::new(t_big_char.to_string()));
+                                    let t_big_char: Option<&str> = row.try_get::<&str, _>(index)?;
+                                    match t_big_char {
+                                        Some(value) => {
+                                            data_row_boxed.push(Box::new(value.to_string()))
+                                        }
+                                        None => data_row_boxed.push(Box::new(None::<&str>)),
+                                    }
                                     continue;
                                 }
                                 ColumnType::NVarchar => {
-                                    let t_n_varchar: &str =
-                                        row.try_get::<&str, _>(index)?.expect("NULL t_n_varchar");
-                                    data_row_boxed.push(Box::new(t_n_varchar.to_string()));
+                                    let t_n_varchar: Option<&str> =
+                                        row.try_get::<&str, _>(index)?;
+                                    match t_n_varchar {
+                                        Some(value) => {
+                                            data_row_boxed.push(Box::new(value.to_string()))
+                                        }
+                                        None => data_row_boxed.push(Box::new(None::<&str>)),
+                                    }
                                     continue;
                                 }
                                 ColumnType::BigVarChar => {
-                                    let t_big_varchar: &str =
-                                        row.try_get::<&str, _>(index)?.expect("NULL t_big_varchar");
-                                    data_row_boxed.push(Box::new(t_big_varchar.to_string()));
+                                    let t_big_varchar: Option<&str> =
+                                        row.try_get::<&str, _>(index)?;
+                                    match t_big_varchar {
+                                        Some(value) => {
+                                            data_row_boxed.push(Box::new(value.to_string()))
+                                        }
+                                        None => data_row_boxed.push(Box::new(None::<&str>)),
+                                    }
                                     continue;
                                 }
-                                _ => {}
+                                _ => {
+                                    panic!("Unknown column type");
+                                }
                             }
                         }
 
