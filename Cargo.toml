@@ -21,6 +21,7 @@ dotenvy = "0.15"
 rust_decimal = { version = "1.39.0", features = ["db-tokio-postgres"] }
 uuid = { version = "1.19", features = ["v4", "serde"] }
 time = "0.3"
+flume = "0.12"
 
 [dev-dependencies]
 assert_cmd = "2.1"

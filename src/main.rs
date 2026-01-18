@@ -118,6 +118,26 @@ async fn main() -> Result<()> {
     println!("{}", "DONE Postgres metadata".green());
     // endregion
     print_separator();
+    // region Compute Partitions
+    println!("Compute SQL Server partitions ...");
+    let sql_server_partitions_result = sql_server_provider
+        .get_copy_partitions(&source_schema_name, &source_table_name, &column_name)
+        .await;
+    if sql_server_partitions_result.is_err() {
+        eprintln!(
+            "{}",
+            sql_server_partitions_result
+                .err()
+                .unwrap()
+                .to_string()
+                .red()
+        );
+        process::exit(1);
+    }
+    let sql_server_partitions = sql_server_partitions_result.ok().unwrap();
+    println!("{}", "DONE Compute SQL Server partitions".green());
+    // endregion
+    print_separator();
     // region SQL Server Connection Pool
     println!("Creating SQL Server Connection Pool ...");
     let sql_server_pool_result = sql_server_provider
@@ -159,6 +179,7 @@ async fn main() -> Result<()> {
         &target_schema_name,
         &target_table_name,
         &column_name,
+        &sql_server_partitions,
     )
     .await;
     println!(
@@ -201,6 +222,7 @@ async fn copy_data(
     target_schema_name: &String,
     target_table_name: &String,
     column_name: &String,
+    sql_server_partitions: &Vec<(i64, i64, i64, i32)>,
 ) {
     let now = Instant::now();
     let mut handles = Vec::new();
@@ -218,6 +240,9 @@ async fn copy_data(
         .map(|x| format!("\"{}\"", x.0.clone()))
         .collect::<Vec<String>>()
         .join(", ");
+
+    let (tx, rx) = flume::unbounded();
+
     for thread_id in 0..threads.clone() {
         let sql_server_pool = sql_server_pool.clone();
         let postgres_column_types = postgres_column_types.clone();
@@ -229,6 +254,7 @@ async fn copy_data(
         let sql_server_columns = sql_server_columns.clone();
         let postgres_columns = postgres_columns.clone();
         let column_name = column_name.clone();
+        let rx = rx.clone();
 
         let handle: JoinHandle<Result<()>> = tokio::spawn(async move {
             let mut sql_server_client = sql_server_pool.get().await.unwrap();
@@ -236,155 +262,171 @@ async fn copy_data(
                 "SELECT {} FROM [{}].[{}] WITH (NOLOCK) WHERE {} BETWEEN @P1 AND @P2;",
                 sql_server_columns, source_schema_name, source_table_name, column_name
             );
-            let start = 0i64; // TODO:
-            let end = 10i64;
 
-            let mut sql_server_stream = sql_server_client
-                .query(&sql_server_stream_query, &[&start, &end])
-                .await
-                .unwrap();
+            while let Ok(partition) = rx.recv_async().await {
+                let (partition_id, start, end, count) = partition;
 
-            let postgres_connection = postgres_pool.get().await?;
-            let postgres_client = postgres_connection.client();
+                let mut sql_server_stream = sql_server_client
+                    .query(&sql_server_stream_query, &[&start, &end])
+                    .await
+                    .unwrap();
 
-            let postgres_sink_query = format!(
-                "COPY \"{}\".\"{}\" ({}) FROM STDIN BINARY;",
-                target_schema_name, target_table_name, postgres_columns,
-            );
-            let postgres_sink = postgres_client.copy_in(&postgres_sink_query).await?;
-            let mut postgres_writer = pin!(BinaryCopyInWriter::new(
-                postgres_sink,
-                &postgres_column_types[..]
-            ));
-            let mut count = 0u64;
-            let mut data_row_boxed: Vec<Box<dyn ToSql + Send + Sync>> =
-                Vec::with_capacity(postgres_column_types.len());
-            while let Some(item) = sql_server_stream.try_next().await.unwrap() {
-                data_row_boxed.clear();
-                match item {
-                    QueryItem::Row(row) => {
-                        for (index, column) in row.columns().iter().enumerate() {
-                            match column.column_type() {
-                                ColumnType::Bitn => {
-                                    let t_boolean: Option<bool> = row.try_get::<bool, _>(index)?;
-                                    data_row_boxed.push(Box::new(t_boolean));
-                                    continue;
-                                }
-                                ColumnType::Int2 => {
-                                    let t_small_int: Option<i16> = row.try_get::<i16, _>(index)?;
-                                    data_row_boxed.push(Box::new(t_small_int));
-                                    continue;
-                                }
-                                ColumnType::Int4 => {
-                                    let t_int_opt: Option<i32> = row.try_get::<i32, _>(index)?;
-                                    data_row_boxed.push(Box::new(t_int_opt));
-                                    continue;
-                                }
-                                ColumnType::Int8 => {
-                                    let t_big_int: Option<i64> = row.try_get::<i64, _>(index)?;
-                                    data_row_boxed.push(Box::new(t_big_int));
-                                    continue;
-                                }
-                                ColumnType::Daten => {
-                                    let t_date: Option<Date> = row.try_get::<Date, _>(index)?;
-                                    data_row_boxed.push(Box::new(t_date));
-                                    continue;
-                                }
-                                ColumnType::Timen => {
-                                    let t_time: Option<Time> = row.try_get::<Time, _>(index)?;
-                                    data_row_boxed.push(Box::new(t_time));
-                                    continue;
-                                }
-                                ColumnType::Datetime2 => {
-                                    let t_date_time_2: Option<PrimitiveDateTime> =
-                                        row.try_get::<PrimitiveDateTime, _>(index)?;
-                                    data_row_boxed.push(Box::new(t_date_time_2));
-                                    continue;
-                                }
-                                ColumnType::Decimaln => {
-                                    let t_decimal: Option<Decimal> =
-                                        row.try_get::<Decimal, _>(index)?;
-                                    data_row_boxed.push(Box::new(t_decimal));
-                                    continue;
-                                }
-                                ColumnType::Float8 => {
-                                    let t_float: Option<f64> = row.try_get::<f64, _>(index)?;
-                                    data_row_boxed.push(Box::new(t_float));
-                                    continue;
-                                }
-                                ColumnType::Guid => {
-                                    let t_uuid: Option<Uuid> = row.try_get::<Uuid, _>(index)?;
-                                    data_row_boxed.push(Box::new(t_uuid));
-                                    continue;
-                                }
-                                ColumnType::NChar => {
-                                    let t_n_char: Option<&str> = row.try_get::<&str, _>(index)?;
-                                    match t_n_char {
-                                        Some(value) => {
-                                            data_row_boxed.push(Box::new(value.to_string()))
-                                        }
-                                        None => data_row_boxed.push(Box::new(None::<&str>)),
+                let postgres_connection = postgres_pool.get().await?;
+                let postgres_client = postgres_connection.client();
+
+                let postgres_sink_query = format!(
+                    "COPY \"{}\".\"{}\" ({}) FROM STDIN BINARY;",
+                    target_schema_name, target_table_name, postgres_columns,
+                );
+                let postgres_sink = postgres_client.copy_in(&postgres_sink_query).await?;
+                let mut postgres_writer = pin!(BinaryCopyInWriter::new(
+                    postgres_sink,
+                    &postgres_column_types[..]
+                ));
+
+                let mut data_row_boxed: Vec<Box<dyn ToSql + Send + Sync>> =
+                    Vec::with_capacity(postgres_column_types.len());
+                while let Some(item) = sql_server_stream.try_next().await.unwrap() {
+                    data_row_boxed.clear();
+                    match item {
+                        QueryItem::Row(row) => {
+                            for (index, column) in row.columns().iter().enumerate() {
+                                match column.column_type() {
+                                    ColumnType::Bitn => {
+                                        let t_boolean: Option<bool> =
+                                            row.try_get::<bool, _>(index)?;
+                                        data_row_boxed.push(Box::new(t_boolean));
+                                        continue;
                                     }
-                                    continue;
-                                }
-                                ColumnType::BigChar => {
-                                    let t_big_char: Option<&str> = row.try_get::<&str, _>(index)?;
-                                    match t_big_char {
-                                        Some(value) => {
-                                            data_row_boxed.push(Box::new(value.to_string()))
-                                        }
-                                        None => data_row_boxed.push(Box::new(None::<&str>)),
+                                    ColumnType::Int2 => {
+                                        let t_small_int: Option<i16> =
+                                            row.try_get::<i16, _>(index)?;
+                                        data_row_boxed.push(Box::new(t_small_int));
+                                        continue;
                                     }
-                                    continue;
-                                }
-                                ColumnType::NVarchar => {
-                                    let t_n_varchar: Option<&str> =
-                                        row.try_get::<&str, _>(index)?;
-                                    match t_n_varchar {
-                                        Some(value) => {
-                                            data_row_boxed.push(Box::new(value.to_string()))
-                                        }
-                                        None => data_row_boxed.push(Box::new(None::<&str>)),
+                                    ColumnType::Int4 => {
+                                        let t_int_opt: Option<i32> =
+                                            row.try_get::<i32, _>(index)?;
+                                        data_row_boxed.push(Box::new(t_int_opt));
+                                        continue;
                                     }
-                                    continue;
-                                }
-                                ColumnType::BigVarChar => {
-                                    let t_big_varchar: Option<&str> =
-                                        row.try_get::<&str, _>(index)?;
-                                    match t_big_varchar {
-                                        Some(value) => {
-                                            data_row_boxed.push(Box::new(value.to_string()))
-                                        }
-                                        None => data_row_boxed.push(Box::new(None::<&str>)),
+                                    ColumnType::Int8 => {
+                                        let t_big_int: Option<i64> =
+                                            row.try_get::<i64, _>(index)?;
+                                        data_row_boxed.push(Box::new(t_big_int));
+                                        continue;
                                     }
-                                    continue;
-                                }
-                                _ => {
-                                    panic!("Unknown column type");
+                                    ColumnType::Daten => {
+                                        let t_date: Option<Date> = row.try_get::<Date, _>(index)?;
+                                        data_row_boxed.push(Box::new(t_date));
+                                        continue;
+                                    }
+                                    ColumnType::Timen => {
+                                        let t_time: Option<Time> = row.try_get::<Time, _>(index)?;
+                                        data_row_boxed.push(Box::new(t_time));
+                                        continue;
+                                    }
+                                    ColumnType::Datetime2 => {
+                                        let t_date_time_2: Option<PrimitiveDateTime> =
+                                            row.try_get::<PrimitiveDateTime, _>(index)?;
+                                        data_row_boxed.push(Box::new(t_date_time_2));
+                                        continue;
+                                    }
+                                    ColumnType::Decimaln => {
+                                        let t_decimal: Option<Decimal> =
+                                            row.try_get::<Decimal, _>(index)?;
+                                        data_row_boxed.push(Box::new(t_decimal));
+                                        continue;
+                                    }
+                                    ColumnType::Float8 => {
+                                        let t_float: Option<f64> = row.try_get::<f64, _>(index)?;
+                                        data_row_boxed.push(Box::new(t_float));
+                                        continue;
+                                    }
+                                    ColumnType::Guid => {
+                                        let t_uuid: Option<Uuid> = row.try_get::<Uuid, _>(index)?;
+                                        data_row_boxed.push(Box::new(t_uuid));
+                                        continue;
+                                    }
+                                    ColumnType::NChar => {
+                                        let t_n_char: Option<&str> =
+                                            row.try_get::<&str, _>(index)?;
+                                        match t_n_char {
+                                            Some(value) => {
+                                                data_row_boxed.push(Box::new(value.to_string()))
+                                            }
+                                            None => data_row_boxed.push(Box::new(None::<&str>)),
+                                        }
+                                        continue;
+                                    }
+                                    ColumnType::BigChar => {
+                                        let t_big_char: Option<&str> =
+                                            row.try_get::<&str, _>(index)?;
+                                        match t_big_char {
+                                            Some(value) => {
+                                                data_row_boxed.push(Box::new(value.to_string()))
+                                            }
+                                            None => data_row_boxed.push(Box::new(None::<&str>)),
+                                        }
+                                        continue;
+                                    }
+                                    ColumnType::NVarchar => {
+                                        let t_n_varchar: Option<&str> =
+                                            row.try_get::<&str, _>(index)?;
+                                        match t_n_varchar {
+                                            Some(value) => {
+                                                data_row_boxed.push(Box::new(value.to_string()))
+                                            }
+                                            None => data_row_boxed.push(Box::new(None::<&str>)),
+                                        }
+                                        continue;
+                                    }
+                                    ColumnType::BigVarChar => {
+                                        let t_big_varchar: Option<&str> =
+                                            row.try_get::<&str, _>(index)?;
+                                        match t_big_varchar {
+                                            Some(value) => {
+                                                data_row_boxed.push(Box::new(value.to_string()))
+                                            }
+                                            None => data_row_boxed.push(Box::new(None::<&str>)),
+                                        }
+                                        continue;
+                                    }
+                                    _ => {
+                                        panic!("Unknown column type");
+                                    }
                                 }
                             }
+
+                            let row_to_write: Vec<&(dyn ToSql + Sync)> = data_row_boxed
+                                .iter()
+                                .map(|s| s.as_ref() as &(dyn ToSql + Sync))
+                                .collect();
+
+                            postgres_writer.as_mut().write(&row_to_write[..]).await?
                         }
-
-                        let row_to_write: Vec<&(dyn ToSql + Sync)> = data_row_boxed
-                            .iter()
-                            .map(|s| s.as_ref() as &(dyn ToSql + Sync))
-                            .collect();
-
-                        postgres_writer.as_mut().write(&row_to_write[..]).await?
+                        _ => {}
                     }
-                    _ => {}
                 }
-                count += 1;
-                if count % 10_000 == 0 {
-                    println!("thread_id = {}, count = {}", thread_id, count);
-                }
+                postgres_writer.finish().await?;
+                println!(
+                    "thread_id = {}, partition_id = {}, count = {}",
+                    thread_id, partition_id, count
+                );
+                //sleep(Duration::from_millis(100)).await;
             }
-            postgres_writer.finish().await?;
 
             Ok(())
         });
         handles.push(handle);
     }
+
+    for partition in sql_server_partitions {
+        tx.send_async(*partition).await.unwrap();
+    }
+
+    drop(tx);
+
     let thread_results = join_all(handles).await;
     for thread_result in thread_results {
         if thread_result.is_err() {

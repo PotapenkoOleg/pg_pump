@@ -4,7 +4,8 @@ use crate::version::PRODUCT_NAME;
 use anyhow::Result;
 use bb8::Pool;
 use bb8_tiberius::ConnectionManager;
-use tiberius::{AuthMethod, Client, ColumnType, Config, EncryptionLevel};
+use futures_util::TryStreamExt;
+use tiberius::{AuthMethod, Client, ColumnType, Config, EncryptionLevel, QueryItem};
 use tokio::net::TcpStream;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 
@@ -107,5 +108,50 @@ impl SqlServerProvider {
         }
 
         Ok(count)
+    }
+
+    pub async fn get_copy_partitions(
+        &self,
+        schema_name: &str,
+        table_name: &str,
+        column_name: &str,
+    ) -> Result<Vec<(i64, i64, i64, i32)>> {
+        let number_of_partitions = 100; // TODO:
+        let tcp = TcpStream::connect(&self.config.get_addr()).await?;
+        tcp.set_nodelay(true)?;
+        let mut client = Client::connect(self.config.clone(), tcp.compat()).await?;
+        let get_count_query = format!(
+            "WITH CTE AS (SELECT {}, NTILE({}) OVER (ORDER BY {}) AS PartitionId FROM [{}].[{}] WITH (NOLOCK)) \
+            SELECT PartitionId, MIN({}) AS [Min], MAX({}) AS [Max], COUNT({}) AS [Count] \
+            FROM CTE GROUP BY PartitionId ORDER BY PartitionId;",
+            column_name,
+            number_of_partitions,
+            column_name,
+            schema_name,
+            table_name,
+            column_name,
+            column_name,
+            column_name
+        );
+
+        let mut result = Vec::new();
+        let mut stream = client
+            .query(&get_count_query, &[])
+            .await?;
+
+        while let Some(item)  = stream.try_next().await? {
+            match item {
+                QueryItem::Row(row) => {
+                    let partition_id: i64 = row.get(0).unwrap_or(0);
+                    let min_value: i64 = row.get(1).unwrap_or(0);
+                    let max_value: i64 = row.get(2).unwrap_or(0);
+                    let count: i32 = row.get(3).unwrap_or(0);
+                    result.push((partition_id, min_value, max_value, count));
+                }
+                _ => {}
+            }
+        }
+
+        Ok(result)
     }
 }
