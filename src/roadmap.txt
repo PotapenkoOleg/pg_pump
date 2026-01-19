@@ -1,5 +1,3 @@
 - add full schema copy
 - add copy for all schemas
-- add target table truncation if not empty
 - add metadata checks
-- add skipping empty tables
