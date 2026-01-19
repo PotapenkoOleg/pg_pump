@@ -9,7 +9,7 @@ pub enum YesNoEnum {
 #[derive(Parser, Debug)]
 #[command(
     author = "Oleg Potapenko",
-    version = "0.1.0",
+    version = "1.0.0",
     about = "Utility for import large tables from SQL Server to Postgres"
 )]
 pub struct Args {
@@ -30,41 +30,36 @@ pub struct Args {
     #[arg(
         long,
         short = 's',
-        default_value = "Sample",
         help = "Source schema name"
-    )] // TODO: remove default value
+    )]
     pub source_schema: String,
 
     #[arg(
         long,
         short = 't',
-        default_value = "TestData1",
         help = "Source table name"
-    )] // TODO: remove default value
+    )]
     pub source_table: String,
 
     #[arg(
         long,
         short = 'S',
-        default_value = "Sample",
         help = "Target schema name"
-    )] // TODO: remove default value
+    )]
     pub target_schema: String,
 
     #[arg(
         long,
         short = 'T',
-        default_value = "TestData1",
         help = "Target table name"
-    )] // TODO: remove default value
+    )]
     pub target_table: String,
 
     #[arg(
         long,
         short = 'C',
-        default_value = "ID",
         help = "Increasing integer column for ordering source table"
-    )] // TODO: remove default value
+    )]
     pub column: String,
 
     // #[arg(long, short = 'M', value_enum, default_value_t = YesNoEnum::Yes, help = "Compare metadata from source and target tables")]
