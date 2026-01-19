@@ -9,7 +9,7 @@ pub enum YesNoEnum {
 #[derive(Parser, Debug)]
 #[command(
     author = "Oleg Potapenko",
-    version = "0.1.0",
+    version = "1.0.0",
     about = "Utility for import large tables from SQL Server to Postgres"
 )]
 pub struct Args {
