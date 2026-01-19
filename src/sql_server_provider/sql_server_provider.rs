@@ -115,8 +115,8 @@ impl SqlServerProvider {
         schema_name: &str,
         table_name: &str,
         column_name: &str,
+        number_of_partitions: i64,
     ) -> Result<Vec<(i64, i64, i64, i32)>> {
-        let number_of_partitions = 100; // TODO:
         let tcp = TcpStream::connect(&self.config.get_addr()).await?;
         tcp.set_nodelay(true)?;
         let mut client = Client::connect(self.config.clone(), tcp.compat()).await?;
@@ -135,11 +135,9 @@ impl SqlServerProvider {
         );
 
         let mut result = Vec::new();
-        let mut stream = client
-            .query(&get_count_query, &[])
-            .await?;
+        let mut stream = client.query(&get_count_query, &[]).await?;
 
-        while let Some(item)  = stream.try_next().await? {
+        while let Some(item) = stream.try_next().await? {
             match item {
                 QueryItem::Row(row) => {
                     let partition_id: i64 = row.get(0).unwrap_or(0);

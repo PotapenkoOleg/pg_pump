@@ -1,5 +1,4 @@
 use crate::config_provider::TargetDatabase;
-use crate::shared::pg_pump_column_type::PgPumpColumnType;
 use anyhow::Result;
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
@@ -48,56 +47,86 @@ impl PostgresConsumer {
         Ok(pool)
     }
 
-    pub async fn get_table_metadata(
-        &self,
-        schema_name: &str,
-        table_name: &str,
-    ) -> Result<Vec<(String, PgPumpColumnType)>> {
-        let (client, connection) = tokio_postgres::connect(&self.connection_string, NoTls).await?;
+    // region Postgres Metadata
 
+    // pub async fn get_table_metadata(
+    //     &self,
+    //     schema_name: &str,
+    //     table_name: &str,
+    // ) -> Result<Vec<(String, PgPumpColumnType)>> {
+    //     let (client, connection) = tokio_postgres::connect(&self.connection_string, NoTls).await?;
+    //
+    //     tokio::spawn(async move {
+    //         if let Err(e) = connection.await {
+    //             eprintln!("connection error: {}", e);
+    //         }
+    //     });
+    //
+    //     let query = format!(
+    //         "SELECT * FROM \"{}\".\"{}\" LIMIT 1;",
+    //         schema_name, table_name
+    //     );
+    //
+    //     let rows = client.query(&query, &[]).await?;
+    //
+    //     let mut result = Vec::new();
+    //     for row in rows {
+    //         let column_name: String = row.get(0);
+    //         let data_type: String = row.get(1);
+    //
+    //         //row.columns()
+    //
+    //         // let pg_type = match data_type.as_str() {
+    //         //     "bigint" => PgPumpColumnType::BigInt,
+    //         //     "integer" => PgPumpColumnType::Integer,
+    //         //     "smallint" => PgPumpColumnType::SmallInt,
+    //         //     "character varying" | "varchar" | "text" => PgPumpColumnType::Varchar,
+    //         //     "boolean" => PgPumpColumnType::Boolean,
+    //         //     "timestamp without time zone" => PgPumpColumnType::Timestamp,
+    //         //     "timestamp with time zone" => PgPumpColumnType::TimestampTz,
+    //         //     "date" => PgPumpColumnType::Date,
+    //         //     "numeric" | "decimal" => PgPumpColumnType::Numeric,
+    //         //     "real" => PgPumpColumnType::Real,
+    //         //     "double precision" => PgPumpColumnType::DoublePrecision,
+    //         //     _ => PgPumpColumnType::Varchar, // Default fallback
+    //         // };
+    //
+    //         result.push((column_name, PgPumpColumnType::Unknown));
+    //     }
+    //
+    //     Ok(result)
+    // }
+
+    // endregion
+
+    // pub async fn get_long_count(&self, schema_name: &str, table_name: &str) -> Result<i64> {
+    //     let query = format!(
+    //         "SELECT COUNT(*) FROM \"{}\".\"{}\";",
+    //         schema_name, table_name
+    //     );
+    //     let (client, connection) = tokio_postgres::connect(&self.connection_string, NoTls).await?;
+    //     tokio::spawn(async move {
+    //         if let Err(e) = connection.await {
+    //             eprintln!("connection error: {}", e);
+    //         }
+    //     });
+    //     let row = client.query_one(&query, &[]).await?;
+    //     let count: i64 = row.get(0);
+    //     Ok(count)
+    // }
+
+    pub async fn truncate_table(&self, schema_name: &str, target_table_name: &str) -> Result<()> {
+        let query = format!(
+            "TRUNCATE TABLE \"{}\".\"{}\";",
+            schema_name, target_table_name
+        );
+        let (client, connection) = tokio_postgres::connect(&self.connection_string, NoTls).await?;
         tokio::spawn(async move {
             if let Err(e) = connection.await {
                 eprintln!("connection error: {}", e);
             }
         });
-
-        let query = format!(
-            "SELECT * FROM \"{}\".\"{}\" LIMIT 1;",
-            schema_name, table_name
-        );
-
-        let rows = client.query(&query, &[]).await?;
-
-        let mut result = Vec::new();
-        for row in rows {
-            let column_name: String = row.get(0);
-            let data_type: String = row.get(1);
-
-            //row.columns()
-
-            // let pg_type = match data_type.as_str() {
-            //     "bigint" => PgPumpColumnType::BigInt,
-            //     "integer" => PgPumpColumnType::Integer,
-            //     "smallint" => PgPumpColumnType::SmallInt,
-            //     "character varying" | "varchar" | "text" => PgPumpColumnType::Varchar,
-            //     "boolean" => PgPumpColumnType::Boolean,
-            //     "timestamp without time zone" => PgPumpColumnType::Timestamp,
-            //     "timestamp with time zone" => PgPumpColumnType::TimestampTz,
-            //     "date" => PgPumpColumnType::Date,
-            //     "numeric" | "decimal" => PgPumpColumnType::Numeric,
-            //     "real" => PgPumpColumnType::Real,
-            //     "double precision" => PgPumpColumnType::DoublePrecision,
-            //     _ => PgPumpColumnType::Varchar, // Default fallback
-            // };
-
-            result.push((column_name, PgPumpColumnType::Unknown));
-        }
-
-        Ok(result)
-    }
-
-    pub async fn get_long_count(&self, schema_name: &str, table_name: &str) -> Result<i64> {
-        // TODO: Implement actual count retrieval
-        Ok(0i64)
+        client.batch_execute(&query).await?;
+        Ok(())
     }
 }

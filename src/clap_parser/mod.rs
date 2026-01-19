@@ -1,7 +1,7 @@
-use clap::{Parser, ValueEnum};
+use clap::{Parser, ValueEnum, value_parser};
 
 #[derive(Debug, Clone, ValueEnum)]
-pub enum YesNoEnum{
+pub enum YesNoEnum {
     Yes,
     No,
 }
@@ -13,37 +13,69 @@ pub enum YesNoEnum{
     about = "Utility for import large tables from SQL Server to Postgres"
 )]
 pub struct Args {
-    #[arg(long, short = 'F', default_value = "pg_pump.toml")]
+    #[arg(
+        long,
+        short = 'F',
+        default_value = "pg_pump.toml",
+        help = "Configuration file name"
+    )]
     pub config_file: String,
 
-    #[arg(long, short = 'r', default_value = "10")]
+    #[arg(long, short = 'r', default_value = "10", value_parser = value_parser!(u32).range(1..=100), help = "Number of threads from 1 to 100")]
     pub threads: u32,
 
-    #[arg(long, short = 'o', default_value = "600")]
+    #[arg(long, short = 'o', default_value = "600", value_parser = value_parser!(u64).range(3..=1200), help = "Connection timeout in seconds from 3 to 1200")]
     pub timeout: u64,
 
-    #[arg(long, short = 's', default_value = "Sample")] // TODO: remove default value
+    #[arg(
+        long,
+        short = 's',
+        default_value = "Sample",
+        help = "Source schema name"
+    )] // TODO: remove default value
     pub source_schema: String,
 
-    #[arg(long, short = 't', default_value = "TestData1")] // TODO: remove default value
+    #[arg(
+        long,
+        short = 't',
+        default_value = "TestData1",
+        help = "Source table name"
+    )] // TODO: remove default value
     pub source_table: String,
 
-    #[arg(long, short = 'S', default_value = "Sample")] // TODO: remove default value
+    #[arg(
+        long,
+        short = 'S',
+        default_value = "Sample",
+        help = "Target schema name"
+    )] // TODO: remove default value
     pub target_schema: String,
 
-    #[arg(long, short = 'T', default_value = "TestData1")] // TODO: remove default value
+    #[arg(
+        long,
+        short = 'T',
+        default_value = "TestData1",
+        help = "Target table name"
+    )] // TODO: remove default value
     pub target_table: String,
 
-    #[arg(long, short = 'C', default_value = "ID")] // TODO: remove default value
+    #[arg(
+        long,
+        short = 'C',
+        default_value = "ID",
+        help = "Increasing integer column for ordering source table"
+    )] // TODO: remove default value
     pub column: String,
 
-    #[arg(long, short = 'M', value_enum, default_value_t = YesNoEnum::Yes)]
-    pub check_metadata: YesNoEnum,
+    // #[arg(long, short = 'M', value_enum, default_value_t = YesNoEnum::Yes, help = "Compare metadata from source and target tables")]
+    // pub check_metadata: YesNoEnum, // TODO:
 
-    #[arg(long, short = 'W', default_value = "5", help = "Wait period in seconds between tasks")]
-    pub wait_period: u64, // TODO:
+    #[arg(long, short = 'W', default_value = "0", value_parser = value_parser!(u64).range(0..=120), help = "Wait period in seconds between tasks from 0 to 120")]
+    pub wait_period: u64,
 
     #[arg(long, short = 'X', value_enum, default_value_t = YesNoEnum::Yes, help = "TRUNCATE target table if it's not empty")]
-    pub truncate_target_table: YesNoEnum, // TODO:
+    pub truncate_target_table: YesNoEnum,
 
+    #[arg(long, short = 'P', default_value = "10000", value_parser = value_parser!(i64).range(1_000..=1_000_000), help = "Minimum records per partition for parallel processing")]
+    pub min_records_per_partition: i64,
 }
