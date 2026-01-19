@@ -1,6 +1,6 @@
 pub const PRODUCT_NAME: &str = "PG_PUMP";
-pub const VERSION_MAJOR: i32 = 0;
-pub const VERSION_MINOR: i32 = 1;
+pub const VERSION_MAJOR: i32 = 1;
+pub const VERSION_MINOR: i32 = 0;
 pub const VERSION_PATCH: i32 = 0;
 pub const VERSION_ALIAS: &str = "Chicago";
 pub const COPYRIGHT: &str = "Oleg Potapenko";
