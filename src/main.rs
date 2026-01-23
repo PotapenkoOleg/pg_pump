@@ -34,11 +34,6 @@ use tokio_postgres::types::{ToSql, Type};
 use tokio_postgres::{GenericClient, NoTls};
 use uuid::Uuid;
 
-const MIN_THREADS: u32 = 1;
-const MAX_THREADS: u32 = 100;
-const MIN_TIMEOUT: u64 = 3;
-const MAX_TIMEOUT: u64 = 1200;
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -46,9 +41,9 @@ async fn main() -> Result<()> {
     print_banner();
     print_separator();
     // region Command Line Args
-    let mut threads = adjust_number_of_threads(&args.threads);
+    let mut threads = args.threads.clone();
     println!("Threads: <{}>", threads);
-    let timeout = adjust_timeout(&args.timeout);
+    let timeout = args.timeout.clone();
     println!("Timeout: <{}> seconds", timeout);
     let source_schema_name = args.source_schema.clone();
     println!("Source schema name: <{}>", &source_schema_name);
@@ -252,26 +247,6 @@ async fn main() -> Result<()> {
     print_separator();
 
     Ok(())
-}
-
-fn adjust_number_of_threads(threads: &u32) -> u32 {
-    if *threads < MIN_THREADS {
-        return MIN_THREADS;
-    }
-    if *threads > MAX_THREADS {
-        return MAX_THREADS;
-    }
-    *threads
-}
-
-fn adjust_timeout(timeout: &u64) -> u64 {
-    if *timeout < MIN_TIMEOUT {
-        return MIN_TIMEOUT;
-    }
-    if *timeout > MAX_TIMEOUT {
-        return MAX_TIMEOUT;
-    }
-    *timeout
 }
 
 fn get_number_of_partitions(long_count: i64, min_records_per_partition: i64) -> i64 {
