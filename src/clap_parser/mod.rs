@@ -39,7 +39,7 @@ pub struct Args {
         long,
         short = 'S',
         default_value = "$",
-        help = "Target schema name. Use '$' if the same source"
+        help = "Target schema name. Use '$' if the same as source"
     )]
     pub target_schema: String,
 
@@ -47,7 +47,7 @@ pub struct Args {
         long,
         short = 'T',
         default_value = "$",
-        help = "Target table name. Use '$' if the same source"
+        help = "Target table name. Use '$' if the same as source"
     )]
     pub target_table: String,
 
