@@ -9,7 +9,7 @@ pub enum YesNoEnum {
 #[derive(Parser, Debug)]
 #[command(
     author = "Oleg Potapenko",
-    version = "1.0.0",
+    version = "1.1.0",
     about = "Utility for import large tables from SQL Server to Postgres"
 )]
 pub struct Args {
@@ -25,7 +25,6 @@ pub struct Args {
         long,
         short = 's',
         help = "Source schema name",
-        default_value = "Sample"
     )]
     pub source_schema: String,
 
@@ -33,7 +32,6 @@ pub struct Args {
         long,
         short = 't',
         help = "Source table name",
-        default_value = "TestData1"
     )]
     pub source_table: String,
 
@@ -57,14 +55,13 @@ pub struct Args {
         long,
         short = 'C',
         help = "Increasing integer column for ordering source table",
-        default_value = "Id"
     )]
     pub column: String,
 
     #[arg(
         long,
         short = 'a',
-        default_value = "11324",
+        default_value = "0",
         help = "Minimum value of the order column"
     )]
     pub min: u64,
@@ -72,7 +69,7 @@ pub struct Args {
     #[arg(
         long,
         short = 'b',
-        default_value = "65856",
+        default_value = "0",
         help = "Maximum value of the order column. Use '0' to copy the whole table"
     )]
     pub max: u64,
@@ -91,7 +88,7 @@ pub struct Args {
     #[arg(long, short = 'w', default_value = "1", value_parser = value_parser!(u32).range(1..=10000), help = "Wait after processing n-th partition")]
     pub wait_nth_partition: u32,
 
-    #[arg(long, short = 'X', value_enum, default_value_t = YesNoEnum::Yes, help = "TRUNCATE target table if it's not empty")]
+    #[arg(long, short = 'X', value_enum, default_value_t = YesNoEnum::No, help = "TRUNCATE target table if it's not empty")]
     pub truncate_target_table: YesNoEnum,
 
     #[arg(long, short = 'P', default_value = "10000", value_parser = value_parser!(i64).range(1_000..=1_000_000), help = "Minimum records per partition for parallel processing")]
