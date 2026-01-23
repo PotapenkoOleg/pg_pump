@@ -41,10 +41,6 @@ async fn main() -> Result<()> {
     print_banner();
     print_separator();
     // region Command Line Args
-    let mut threads = args.threads.clone();
-    println!("Threads: <{}>", threads);
-    let timeout = args.timeout.clone();
-    println!("Timeout: <{}> seconds", timeout);
     let source_schema_name = args.source_schema.clone();
     println!("Source schema name: <{}>", &source_schema_name);
     let source_table_name = args.source_table.clone();
@@ -61,8 +57,24 @@ async fn main() -> Result<()> {
     println!("Target table name: <{}>", &target_table_name);
     let column_name = args.column.clone();
     println!("Column name: <{}>", &column_name);
+    let mut min = args.min.clone();
+    let max = args.max.clone();
+    if max == 0 {
+        min = 0;
+    }
+    println!("Min: <{}>", min);
+    println!("Max: <{}>", max);
+    let mut threads = args.threads.clone();
+    println!("Threads: <{}>", threads);
+    let timeout = args.timeout.clone();
+    println!("Timeout: <{}> seconds", timeout);
     let wait_period = args.wait_period.clone();
     println!("Wait period: <{}> seconds", &wait_period);
+    let wait_nth_partition = args.wait_nth_partition.clone();
+    println!(
+        "Wait after processing n-th partition: <{}>",
+        wait_nth_partition
+    );
     let truncate_target_table = args.truncate_target_table.clone();
     println!("Truncate target table: <{:?}>", truncate_target_table);
     let min_records_per_partition = args.min_records_per_partition.clone();
@@ -88,7 +100,13 @@ async fn main() -> Result<()> {
     println!("Getting SQL Server metadata ...");
     let sql_server_provider = SqlServerProvider::new(&config.get_source_database_as_ref());
     let long_count = sql_server_provider
-        .get_long_count(&source_schema_name, &source_table_name)
+        .get_long_count(
+            &source_schema_name,
+            &source_table_name,
+            &column_name,
+            min,
+            max,
+        )
         .await;
     if long_count.is_err() {
         eprintln!("{}", long_count.err().unwrap().to_string().red());
@@ -106,10 +124,12 @@ async fn main() -> Result<()> {
         );
         process::exit(0);
     }
-    println!(
-        "{}",
-        format!("Source table count: <{}>", sql_server_long_count).yellow()
-    );
+    let mut sql_server_long_count_msg = format!("Source table count: <{}>", sql_server_long_count);
+    if max != 0 {
+        sql_server_long_count_msg
+            .push_str(format!(" between min: <{}> and max: <{}>)", min, max).as_str());
+    }
+    println!("{}", sql_server_long_count_msg.yellow());
     let number_of_partitions =
         get_number_of_partitions(sql_server_long_count, min_records_per_partition);
     println!(
@@ -177,6 +197,8 @@ async fn main() -> Result<()> {
             &source_table_name,
             &column_name,
             number_of_partitions,
+            min,
+            max,
         )
         .await;
     if sql_server_partitions_result.is_err() {
@@ -237,6 +259,7 @@ async fn main() -> Result<()> {
         &column_name,
         &sql_server_partitions,
         wait_period,
+        wait_nth_partition,
     )
     .await;
     println!(
@@ -269,6 +292,7 @@ async fn copy_data(
     column_name: &String,
     sql_server_partitions: &Vec<(i64, i64, i64, i32)>,
     wait_period: u64,
+    wait_nth_partition: u32,
 ) {
     let now = Instant::now();
     let mut handles = Vec::new();
@@ -302,6 +326,7 @@ async fn copy_data(
         let postgres_columns = postgres_columns.clone();
         let column_name = column_name.clone();
         let wait_period = wait_period.clone();
+        let wait_nth_partition = wait_nth_partition.clone();
         let rx = rx.clone();
 
         let handle: JoinHandle<Result<()>> = tokio::spawn(async move {
@@ -310,8 +335,11 @@ async fn copy_data(
                 "SELECT {} FROM [{}].[{}] WITH (NOLOCK) WHERE {} BETWEEN @P1 AND @P2;",
                 sql_server_columns, source_schema_name, source_table_name, column_name
             );
+            let mut partition_count = 0;
 
             while let Ok(partition) = rx.recv_async().await {
+                partition_count += 1;
+
                 let (partition_id, start, end, count) = partition;
 
                 let mut sql_server_stream = sql_server_client
@@ -461,11 +489,12 @@ async fn copy_data(
                     "thread_id = {}, partition_id = {}, count = {}",
                     thread_id, partition_id, count
                 );
-                if wait_period > 0 {
+                if wait_period > 0 && partition_count == wait_nth_partition {
                     println!(
-                        "thread_id = {}, partition_id = {}, sleeping for {} seconds",
-                        thread_id, partition_id, wait_period
+                        "thread_id = {}, partition_id = {}, partition_count = {}, sleeping for {} seconds",
+                        thread_id, partition_id, partition_count, wait_period
                     );
+                    partition_count = 0;
                     sleep(Duration::from_secs(wait_period)).await;
                 }
             }

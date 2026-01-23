@@ -89,14 +89,26 @@ impl SqlServerProvider {
         Ok(result)
     }
 
-    pub async fn get_long_count(&self, schema_name: &str, table_name: &str) -> Result<i64> {
+    pub async fn get_long_count(
+        &self,
+        schema_name: &str,
+        table_name: &str,
+        column_name: &str,
+        min: u64,
+        max: u64,
+    ) -> Result<i64> {
         let tcp = TcpStream::connect(&self.config.get_addr()).await?;
         tcp.set_nodelay(true)?;
         let mut client = Client::connect(self.config.clone(), tcp.compat()).await?;
-        let get_count_query = format!(
-            "SELECT COUNT_BIG(*) FROM [{}].[{}] WITH (NOLOCK);",
+        let mut get_count_query = format!(
+            "SELECT COUNT_BIG(*) FROM [{}].[{}] WITH (NOLOCK)",
             schema_name, table_name
         );
+        if max != 0 {
+            get_count_query
+                .push_str(format!(" WHERE {} BETWEEN {} AND {}", column_name, min, max).as_str());
+        }
+        get_count_query.push(';');
         let row = client
             .query(&get_count_query, &[])
             .await?
@@ -116,19 +128,25 @@ impl SqlServerProvider {
         table_name: &str,
         column_name: &str,
         number_of_partitions: i64,
+        min: u64,
+        max: u64,
     ) -> Result<Vec<(i64, i64, i64, i32)>> {
         let tcp = TcpStream::connect(&self.config.get_addr()).await?;
         tcp.set_nodelay(true)?;
         let mut client = Client::connect(self.config.clone(), tcp.compat()).await?;
+        let mut get_count_inner_query = format!(
+            "SELECT {}, NTILE({}) OVER (ORDER BY {}) AS PartitionId FROM [{}].[{}] WITH (NOLOCK)",
+            column_name, number_of_partitions, column_name, schema_name, table_name
+        );
+        if max != 0 {
+            get_count_inner_query
+                .push_str(format!(" WHERE {} BETWEEN {} AND {}", column_name, min, max).as_str());
+        }
         let get_count_query = format!(
-            "WITH CTE AS (SELECT {}, NTILE({}) OVER (ORDER BY {}) AS PartitionId FROM [{}].[{}] WITH (NOLOCK)) \
+            "WITH CTE AS ({}) \
             SELECT PartitionId, MIN({}) AS [Min], MAX({}) AS [Max], COUNT({}) AS [Count] \
             FROM CTE GROUP BY PartitionId ORDER BY PartitionId;",
-            column_name,
-            number_of_partitions,
-            column_name,
-            schema_name,
-            table_name,
+            get_count_inner_query,
             column_name,
             column_name,
             column_name
