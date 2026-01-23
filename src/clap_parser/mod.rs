@@ -27,31 +27,25 @@ pub struct Args {
     #[arg(long, short = 'o', default_value = "600", value_parser = value_parser!(u64).range(3..=1200), help = "Connection timeout in seconds from 3 to 1200")]
     pub timeout: u64,
 
-    #[arg(
-        long,
-        short = 's',
-        help = "Source schema name"
-    )]
+    #[arg(long, short = 's', help = "Source schema name")]
     pub source_schema: String,
 
-    #[arg(
-        long,
-        short = 't',
-        help = "Source table name"
-    )]
+    #[arg(long, short = 't', help = "Source table name")]
     pub source_table: String,
 
     #[arg(
         long,
         short = 'S',
-        help = "Target schema name"
+        default_value = "$",
+        help = "Target schema name. Use '$' if the same source"
     )]
     pub target_schema: String,
 
     #[arg(
         long,
         short = 'T',
-        help = "Target table name"
+        default_value = "$",
+        help = "Target table name. Use '$' if the same source"
     )]
     pub target_table: String,
 
@@ -64,7 +58,6 @@ pub struct Args {
 
     // #[arg(long, short = 'M', value_enum, default_value_t = YesNoEnum::Yes, help = "Compare metadata from source and target tables")]
     // pub check_metadata: YesNoEnum, // TODO:
-
     #[arg(long, short = 'W', default_value = "0", value_parser = value_parser!(u64).range(0..=120), help = "Wait period in seconds between tasks from 0 to 120")]
     pub wait_period: u64,
 

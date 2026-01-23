@@ -54,9 +54,15 @@ async fn main() -> Result<()> {
     println!("Source schema name: <{}>", &source_schema_name);
     let source_table_name = args.source_table.clone();
     println!("Source table name: <{}>", &source_table_name);
-    let target_schema_name = args.target_schema.clone();
+    let mut target_schema_name = args.target_schema.clone();
+    if target_schema_name.eq("$") {
+        target_schema_name = source_schema_name.clone();
+    }
     println!("Target schema name: <{}>", &target_schema_name);
-    let target_table_name = args.target_table.clone();
+    let mut target_table_name = args.target_table.clone();
+    if target_table_name.eq("$") {
+        target_table_name = source_table_name.clone();
+    }
     println!("Target table name: <{}>", &target_table_name);
     let column_name = args.column.clone();
     println!("Column name: <{}>", &column_name);
