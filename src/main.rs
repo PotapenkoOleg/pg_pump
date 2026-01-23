@@ -127,7 +127,7 @@ async fn main() -> Result<()> {
     let mut sql_server_long_count_msg = format!("Source table count: <{}>", sql_server_long_count);
     if max != 0 {
         sql_server_long_count_msg
-            .push_str(format!(" between min: <{}> and max: <{}>)", min, max).as_str());
+            .push_str(format!(" between min = <{}> and max = <{}>", min, max).as_str());
     }
     println!("{}", sql_server_long_count_msg.yellow());
     let number_of_partitions =
