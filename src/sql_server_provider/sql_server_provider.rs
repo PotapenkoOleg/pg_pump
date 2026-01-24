@@ -30,6 +30,7 @@ impl SqlServerProvider {
         config.encryption(EncryptionLevel::NotSupported); // TODO: remove on PROD
         SqlServerProvider { config }
     }
+
     pub async fn create_connection_pool(
         &self,
         threads: u32,
@@ -43,6 +44,24 @@ impl SqlServerProvider {
             .await?;
 
         Ok(pool)
+    }
+
+    async fn execute_query(&self, query: &str) -> Result<Vec<String>> {
+        let tcp = TcpStream::connect(&self.config.get_addr()).await?;
+        tcp.set_nodelay(true)?;
+        let mut client = Client::connect(self.config.clone(), tcp.compat()).await?;
+        let mut stream = client.query(query, &[]).await?;
+        let mut result = Vec::new();
+        while let Some(item) = stream.try_next().await? {
+            match item {
+                QueryItem::Row(row) => {
+                    let data: &str = row.get(0).unwrap();
+                    result.push(data.to_string());
+                }
+                _ => {}
+            }
+        }
+        Ok(result)
     }
 }
 
@@ -151,10 +170,8 @@ impl DbProvider for SqlServerProvider {
         let tcp = TcpStream::connect(&self.config.get_addr()).await?;
         tcp.set_nodelay(true)?;
         let mut client = Client::connect(self.config.clone(), tcp.compat()).await?;
-
-        let mut result = Vec::new();
         let mut stream = client.query(&get_count_query, &[]).await?;
-
+        let mut result = Vec::new();
         while let Some(item) = stream.try_next().await? {
             match item {
                 QueryItem::Row(row) => {
@@ -169,5 +186,15 @@ impl DbProvider for SqlServerProvider {
         }
 
         Ok(result)
+    }
+
+    async fn get_all_schemas(&self) -> Result<Vec<String>> {
+        let get_schemas_query = "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA AS S WHERE S.SCHEMA_NAME NOT IN ('db_accessadmin','db_backupoperator','db_datareader','db_datawriter','db_ddladmin','db_denydatareader','db_denydatawriter','db_owner','db_securityadmin','guest','INFORMATION_SCHEMA','sys') ORDER BY S.SCHEMA_NAME;";
+        self.execute_query(get_schemas_query).await
+    }
+
+    async fn get_all_tables_in_schema(&self, schema_name: &str) -> Result<Vec<String>> {
+        let get_tables_query = format!("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES AS T WHERE T.TABLE_SCHEMA = '{}' ORDER BY TABLE_NAME;", schema_name);
+        self.execute_query(&get_tables_query).await
     }
 }

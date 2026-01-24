@@ -101,6 +101,8 @@ async fn main() -> Result<()> {
     // region SQL Server Metadata
     println!("Getting SQL Server metadata ...");
     let sql_server_provider = SqlServerProvider::new(&config.get_source_database_as_ref());
+    //let schemas = sql_server_provider.get_all_schemas().await?;
+    //let tables = sql_server_provider.get_all_tables_in_schema(&source_schema_name).await?;
     let long_count: Result<i64> = sql_server_provider
         .get_long_count(
             &source_schema_name,

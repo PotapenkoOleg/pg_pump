@@ -50,6 +50,25 @@ impl PostgresProvider {
             .await?;
         Ok(pool)
     }
+
+    async fn execute_query(&self, query: &str) -> anyhow::Result<Vec<String>> {
+        let (client, connection) = tokio_postgres::connect(&self.connection_string, NoTls).await?;
+
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                eprintln!("connection error: {}", e);
+            }
+        });
+
+        let rows = client.query(query, &[]).await?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            let data: &str = row.get(0);
+            result.push(data.to_string());
+        }
+        Ok(result)
+    }
 }
 impl DbProvider for PostgresProvider {
     async fn get_table_metadata(
@@ -174,6 +193,19 @@ impl DbProvider for PostgresProvider {
         }
         Ok(result)
     }
+
+    async fn get_all_schemas(&self) -> anyhow::Result<Vec<String>> {
+        let get_schemas_query = "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA AS S WHERE S.SCHEMA_NAME NOT IN ('information_schema', 'pg_catalog', 'pg_toast') ORDER BY S.SCHEMA_NAME;";
+        self.execute_query(get_schemas_query).await
+    }
+
+    async fn get_all_tables_in_schema(&self, schema_name: &str) -> anyhow::Result<Vec<String>> {
+        let get_tables_query = format!(
+            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES AS T WHERE T.TABLE_SCHEMA = '{}' ORDER BY TABLE_NAME;",
+            schema_name
+        );
+        self.execute_query(&get_tables_query).await
+    }
 }
 
 #[cfg(test)]
@@ -201,7 +233,7 @@ mod tests {
         assert!(provider.connection_string.contains("postgres"));
         assert!(provider.connection_string.contains("postgres"));
     }
-
+    
     #[tokio::test]
     async fn test_get_long_count() {
         let source_db = create_test_source_database();
@@ -229,5 +261,20 @@ mod tests {
             .unwrap();
 
         assert!(!partitions.is_empty());
+    }
+    #[tokio::test]
+    async fn test_get_all_schemas() {
+        let source_db = create_test_source_database();
+        let provider = PostgresProvider::new(&source_db);
+        let schemas = provider.get_all_schemas().await.unwrap();
+        assert!(!schemas.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_all_tables_in_schema() {
+        let source_db = create_test_source_database();
+        let provider = PostgresProvider::new(&source_db);
+        let tables = provider.get_all_tables_in_schema(&"Sample").await.unwrap();
+        assert!(!tables.is_empty());
     }
 }

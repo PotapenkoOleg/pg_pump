@@ -25,4 +25,8 @@ pub trait DbProvider {
         min: u64,
         max: u64,
     ) -> anyhow::Result<Vec<(i64, i64, i64, i64)>>;
+
+    async fn get_all_schemas(&self) -> anyhow::Result<Vec<String>>;
+
+    async fn get_all_tables_in_schema(&self, schema_name: &str) -> anyhow::Result<Vec<String>>;
 }
