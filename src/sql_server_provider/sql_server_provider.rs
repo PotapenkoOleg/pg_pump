@@ -3,7 +3,7 @@ use crate::shared::db_provider::DbProvider;
 use crate::shared::pg_pump_column_type::PgPumpColumnType;
 use crate::version::PRODUCT_NAME;
 use anyhow::Result;
-use bb8::{ManageConnection, Pool};
+use bb8::Pool;
 use bb8_tiberius::ConnectionManager;
 use futures_util::TryStreamExt;
 use tiberius::{AuthMethod, Client, ColumnType, Config, EncryptionLevel, QueryItem};
@@ -132,7 +132,7 @@ impl DbProvider for SqlServerProvider {
         number_of_partitions: i64,
         min: u64,
         max: u64,
-    ) -> Result<Vec<(i64, i64, i64, i32)>> {
+    ) -> Result<Vec<(i64, i64, i64, i64)>> {
         let mut get_count_inner_query = format!(
             "SELECT {}, NTILE({}) OVER (ORDER BY {}) AS PartitionId FROM [{}].[{}] WITH (NOLOCK)",
             column_name, number_of_partitions, column_name, schema_name, table_name
@@ -143,7 +143,7 @@ impl DbProvider for SqlServerProvider {
         }
         let get_count_query = format!(
             "WITH CTE AS ({}) \
-            SELECT PartitionId, MIN({}) AS [Min], MAX({}) AS [Max], COUNT({}) AS [Count] \
+            SELECT PartitionId, MIN({}) AS [Min], MAX({}) AS [Max], COUNT_BIG({}) AS [Count] \
             FROM CTE GROUP BY PartitionId ORDER BY PartitionId;",
             get_count_inner_query, column_name, column_name, column_name
         );
@@ -161,7 +161,7 @@ impl DbProvider for SqlServerProvider {
                     let partition_id: i64 = row.get(0).unwrap_or(0);
                     let min_value: i64 = row.get(1).unwrap_or(0);
                     let max_value: i64 = row.get(2).unwrap_or(0);
-                    let count: i32 = row.get(3).unwrap_or(0);
+                    let count: i64 = row.get(3).unwrap_or(0);
                     result.push((partition_id, min_value, max_value, count));
                 }
                 _ => {}

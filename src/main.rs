@@ -193,7 +193,7 @@ async fn main() -> Result<()> {
     print_separator();
     // region Compute Partitions
     println!("Compute SQL Server partitions ...");
-    let sql_server_partitions_result: Result<Vec<(i64, i64, i64, i32)>> = sql_server_provider
+    let sql_server_partitions_result: Result<Vec<(i64, i64, i64, i64)>> = sql_server_provider
         .get_copy_partitions(
             &source_schema_name,
             &source_table_name,
@@ -292,7 +292,7 @@ async fn copy_data(
     target_schema_name: &String,
     target_table_name: &String,
     column_name: &String,
-    sql_server_partitions: &Vec<(i64, i64, i64, i32)>,
+    sql_server_partitions: &Vec<(i64, i64, i64, i64)>,
     wait_period: u64,
     wait_nth_partition: u32,
 ) {

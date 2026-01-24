@@ -24,5 +24,5 @@ pub trait DbProvider {
         number_of_partitions: i64,
         min: u64,
         max: u64,
-    ) -> anyhow::Result<Vec<(i64, i64, i64, i32)>>;
+    ) -> anyhow::Result<Vec<(i64, i64, i64, i64)>>;
 }

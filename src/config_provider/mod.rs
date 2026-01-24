@@ -28,6 +28,16 @@ pub struct SourceDatabase {
 }
 
 impl SourceDatabase {
+    pub fn new(host: String, port: u16, database: String, user: String, password: String) -> Self {
+        Self {
+            host,
+            port,
+            database,
+            user,
+            password,
+        }
+    }
+
     pub fn get_host_as_ref(&self) -> &String {
         &self.host
     }

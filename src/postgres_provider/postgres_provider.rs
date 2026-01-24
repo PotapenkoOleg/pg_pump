@@ -5,6 +5,9 @@ use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 use tokio_postgres::{Config, NoTls};
 
+#[cfg(test)]
+use tokio;
+
 pub struct PostgresProvider {
     config: Config,
     connection_string: String,
@@ -135,18 +138,19 @@ impl DbProvider for PostgresProvider {
         number_of_partitions: i64,
         min: u64,
         max: u64,
-    ) -> anyhow::Result<Vec<(i64, i64, i64, i32)>> {
+    ) -> anyhow::Result<Vec<(i64, i64, i64, i64)>> {
         let mut get_partitions_inner_query = format!(
-            "SELECT {}, NTILE({}) OVER (ORDER BY {}) AS PartitionId FROM [{}].[{}] WITH (NOLOCK)",
+            "SELECT \"{}\", NTILE({}) OVER (ORDER BY \"{}\") AS PartitionId FROM \"{}\".\"{}\"",
             column_name, number_of_partitions, column_name, schema_name, table_name
         );
         if max != 0 {
-            get_partitions_inner_query
-                .push_str(format!(" WHERE {} BETWEEN {} AND {}", column_name, min, max).as_str());
+            get_partitions_inner_query.push_str(
+                format!(" WHERE \"{}\" BETWEEN {} AND {}", column_name, min, max).as_str(),
+            );
         }
         let get_partitions_query = format!(
             "WITH CTE AS ({}) \
-            SELECT PartitionId, MIN({}) AS [Min], MAX({}) AS [Max], COUNT({}) AS [Count] \
+            SELECT PartitionId, MIN(\"{}\") AS \"Min\", MAX(\"{}\") AS \"Max\", COUNT(\"{}\") AS \"Count\" \
             FROM CTE GROUP BY PartitionId ORDER BY PartitionId;",
             get_partitions_inner_query, column_name, column_name, column_name
         );
@@ -162,12 +166,68 @@ impl DbProvider for PostgresProvider {
 
         let mut result = Vec::new();
         for row in rows {
-            let partition_id: i64 = row.get(0);
+            let partition_id: i32 = row.get(0);
             let min_value: i64 = row.get(1);
             let max_value: i64 = row.get(2);
-            let count: i32 = row.get(3);
-            result.push((partition_id, min_value, max_value, count));
+            let count: i64 = row.get(3);
+            result.push((partition_id as i64, min_value, max_value, count));
         }
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_source_database() -> SourceDatabase {
+        SourceDatabase::new(
+            "localhost".to_string(),
+            5432,
+            "developer".to_string(),
+            "postgres".to_string(),
+            "postgres".to_string(),
+        )
+    }
+
+    #[test]
+    fn test_postgres_provider_new() {
+        let source_db = create_test_source_database();
+        let provider = PostgresProvider::new(&source_db);
+
+        assert!(provider.connection_string.contains("localhost"));
+        assert!(provider.connection_string.contains("5432"));
+        assert!(provider.connection_string.contains("developer"));
+        assert!(provider.connection_string.contains("postgres"));
+        assert!(provider.connection_string.contains("postgres"));
+    }
+
+    #[tokio::test]
+    async fn test_get_long_count() {
+        let source_db = create_test_source_database();
+        let provider = PostgresProvider::new(&source_db);
+
+        let count = provider
+            .get_long_count(&"Sample", &"TestData1", &"ID", 0, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(count, 98779);
+    }
+
+    #[tokio::test]
+    async fn test_get_table_metadata() {}
+
+    #[tokio::test]
+    async fn test_get_copy_partitions() {
+        let source_db = create_test_source_database();
+        let provider = PostgresProvider::new(&source_db);
+
+        let partitions = provider
+            .get_copy_partitions(&"Sample", &"TestData1", &"ID", 10, 1022, 99800)
+            .await
+            .unwrap();
+
+        assert!(!partitions.is_empty());
     }
 }
