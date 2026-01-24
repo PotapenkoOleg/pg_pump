@@ -1,8 +1,9 @@
 use crate::config_provider::SourceDatabase;
+use crate::shared::db_provider::DbProvider;
 use crate::shared::pg_pump_column_type::PgPumpColumnType;
 use crate::version::PRODUCT_NAME;
 use anyhow::Result;
-use bb8::Pool;
+use bb8::{ManageConnection, Pool};
 use bb8_tiberius::ConnectionManager;
 use futures_util::TryStreamExt;
 use tiberius::{AuthMethod, Client, ColumnType, Config, EncryptionLevel, QueryItem};
@@ -29,7 +30,6 @@ impl SqlServerProvider {
         config.encryption(EncryptionLevel::NotSupported); // TODO: remove on PROD
         SqlServerProvider { config }
     }
-
     pub async fn create_connection_pool(
         &self,
         threads: u32,
@@ -44,8 +44,10 @@ impl SqlServerProvider {
 
         Ok(pool)
     }
+}
 
-    pub async fn get_table_metadata(
+impl DbProvider for SqlServerProvider {
+    async fn get_table_metadata(
         &self,
         schema_name: &str,
         table_name: &str,
@@ -89,7 +91,7 @@ impl SqlServerProvider {
         Ok(result)
     }
 
-    pub async fn get_long_count(
+    async fn get_long_count(
         &self,
         schema_name: &str,
         table_name: &str,
@@ -122,7 +124,7 @@ impl SqlServerProvider {
         Ok(count)
     }
 
-    pub async fn get_copy_partitions(
+    async fn get_copy_partitions(
         &self,
         schema_name: &str,
         table_name: &str,
@@ -131,9 +133,6 @@ impl SqlServerProvider {
         min: u64,
         max: u64,
     ) -> Result<Vec<(i64, i64, i64, i32)>> {
-        let tcp = TcpStream::connect(&self.config.get_addr()).await?;
-        tcp.set_nodelay(true)?;
-        let mut client = Client::connect(self.config.clone(), tcp.compat()).await?;
         let mut get_count_inner_query = format!(
             "SELECT {}, NTILE({}) OVER (ORDER BY {}) AS PartitionId FROM [{}].[{}] WITH (NOLOCK)",
             column_name, number_of_partitions, column_name, schema_name, table_name
@@ -146,11 +145,12 @@ impl SqlServerProvider {
             "WITH CTE AS ({}) \
             SELECT PartitionId, MIN({}) AS [Min], MAX({}) AS [Max], COUNT({}) AS [Count] \
             FROM CTE GROUP BY PartitionId ORDER BY PartitionId;",
-            get_count_inner_query,
-            column_name,
-            column_name,
-            column_name
+            get_count_inner_query, column_name, column_name, column_name
         );
+
+        let tcp = TcpStream::connect(&self.config.get_addr()).await?;
+        tcp.set_nodelay(true)?;
+        let mut client = Client::connect(self.config.clone(), tcp.compat()).await?;
 
         let mut result = Vec::new();
         let mut stream = client.query(&get_count_query, &[]).await?;

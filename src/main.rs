@@ -2,6 +2,7 @@ mod clap_parser;
 mod config_provider;
 mod helpers;
 mod postgres_consumer;
+mod postgres_provider;
 mod shared;
 mod sql_server_provider;
 mod version;
@@ -10,6 +11,7 @@ use crate::clap_parser::{Args, YesNoEnum};
 use crate::config_provider::ConfigProvider;
 use crate::helpers::{print_banner, print_separator};
 use crate::postgres_consumer::postgres_consumer::PostgresConsumer;
+use crate::shared::db_provider::DbProvider;
 use crate::shared::pg_pump_column_type::PgPumpColumnType;
 use crate::shared::postgres_column_types::PostgresColumnTypeProvider;
 use crate::sql_server_provider::sql_server_provider::SqlServerProvider;
@@ -99,7 +101,7 @@ async fn main() -> Result<()> {
     // region SQL Server Metadata
     println!("Getting SQL Server metadata ...");
     let sql_server_provider = SqlServerProvider::new(&config.get_source_database_as_ref());
-    let long_count = sql_server_provider
+    let long_count: Result<i64> = sql_server_provider
         .get_long_count(
             &source_schema_name,
             &source_table_name,
@@ -140,7 +142,7 @@ async fn main() -> Result<()> {
         threads = number_of_partitions as u32;
         println!("{}", format!("Threads: <{}>", threads).yellow());
     }
-    let sql_server_metadata_result = sql_server_provider
+    let sql_server_metadata_result: Result<Vec<(String, PgPumpColumnType)>> = sql_server_provider
         .get_table_metadata(&source_schema_name, &source_table_name)
         .await;
     if sql_server_metadata_result.is_err() {
@@ -191,7 +193,7 @@ async fn main() -> Result<()> {
     print_separator();
     // region Compute Partitions
     println!("Compute SQL Server partitions ...");
-    let sql_server_partitions_result = sql_server_provider
+    let sql_server_partitions_result: Result<Vec<(i64, i64, i64, i32)>> = sql_server_provider
         .get_copy_partitions(
             &source_schema_name,
             &source_table_name,
