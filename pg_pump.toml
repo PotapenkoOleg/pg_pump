@@ -1,9 +1,18 @@
 [source_database]
+db_type = "sql_server"
 host = "localhost"
 port = 1433
 database = "developer"
 user = "sa"
 password = "wOf-odESTO2r"
+
+#[source_database]
+#db_type = "postgres" # THIS IS NOT SUPPORTED IN VERSION 2.0
+#host = "localhost"
+#port = 5432
+#database = "developer"
+#user = "postgres"
+#password = "postgres"
 
 [target_database]
 host = "localhost"

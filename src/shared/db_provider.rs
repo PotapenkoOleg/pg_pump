@@ -1,6 +1,9 @@
+use std::fmt::Debug;
+use async_trait::async_trait;
 use crate::shared::pg_pump_column_type::PgPumpColumnType;
 
-pub trait DbProvider {
+#[async_trait]
+pub trait DbProvider: Send + Sync {
     async fn get_table_metadata(
         &self,
         schema_name: &str,

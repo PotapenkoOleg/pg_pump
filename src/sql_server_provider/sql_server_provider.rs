@@ -3,6 +3,7 @@ use crate::shared::db_provider::DbProvider;
 use crate::shared::pg_pump_column_type::PgPumpColumnType;
 use crate::version::PRODUCT_NAME;
 use anyhow::Result;
+use async_trait::async_trait;
 use bb8::Pool;
 use bb8_tiberius::ConnectionManager;
 use futures_util::TryStreamExt;
@@ -65,6 +66,7 @@ impl SqlServerProvider {
     }
 }
 
+#[async_trait]
 impl DbProvider for SqlServerProvider {
     async fn get_table_metadata(
         &self,

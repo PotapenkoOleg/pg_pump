@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use crate::config_provider::SourceDatabase;
 use crate::shared::db_provider::DbProvider;
 use crate::shared::pg_pump_column_type::PgPumpColumnType;
@@ -70,6 +71,8 @@ impl PostgresProvider {
         Ok(result)
     }
 }
+
+#[async_trait]
 impl DbProvider for PostgresProvider {
     async fn get_table_metadata(
         &self,
@@ -214,6 +217,7 @@ mod tests {
 
     fn create_test_source_database() -> SourceDatabase {
         SourceDatabase::new(
+            "postgres".to_string(),
             "localhost".to_string(),
             5432,
             "developer".to_string(),

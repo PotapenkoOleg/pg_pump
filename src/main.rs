@@ -3,6 +3,7 @@ mod config_provider;
 mod helpers;
 mod postgres_consumer;
 mod postgres_provider;
+mod settings;
 mod shared;
 mod sql_server_provider;
 mod version;
@@ -11,6 +12,8 @@ use crate::clap_parser::{Args, YesNoEnum};
 use crate::config_provider::ConfigProvider;
 use crate::helpers::{print_banner, print_separator};
 use crate::postgres_consumer::postgres_consumer::PostgresConsumer;
+use crate::postgres_provider::postgres_provider::PostgresProvider;
+use crate::settings::settings::Settings;
 use crate::shared::db_provider::DbProvider;
 use crate::shared::pg_pump_column_type::PgPumpColumnType;
 use crate::shared::postgres_column_types::PostgresColumnTypeProvider;
@@ -24,6 +27,7 @@ use colored::Colorize;
 use futures_util::TryStreamExt;
 use futures_util::future::join_all;
 use rust_decimal::prelude::*;
+use std::any::Any;
 use std::pin::pin;
 use std::process;
 use std::time::Duration;
@@ -42,50 +46,14 @@ async fn main() -> Result<()> {
     print_separator();
     print_banner();
     print_separator();
+
     // region Command Line Args
-    let source_schema_name = args.source_schema.clone();
-    println!("Source schema name: <{}>", &source_schema_name);
-    let source_table_name = args.source_table.clone();
-    println!("Source table name: <{}>", &source_table_name);
-    let mut target_schema_name = args.target_schema.clone();
-    if target_schema_name.eq("$") {
-        target_schema_name = source_schema_name.clone();
-    }
-    println!("Target schema name: <{}>", &target_schema_name);
-    let mut target_table_name = args.target_table.clone();
-    if target_table_name.eq("$") {
-        target_table_name = source_table_name.clone();
-    }
-    println!("Target table name: <{}>", &target_table_name);
-    let column_name = args.column.clone();
-    println!("Column name: <{}>", &column_name);
-    let mut min = args.min.clone();
-    let max = args.max.clone();
-    if max == 0 {
-        min = 0;
-    }
-    println!("Min: <{}>", min);
-    println!("Max: <{}>", max);
-    let mut threads = args.threads.clone();
-    println!("Threads: <{}>", threads);
-    let timeout = args.timeout.clone();
-    println!("Timeout: <{}> seconds", timeout);
-    let wait_period = args.wait_period.clone();
-    println!("Wait period: <{}> seconds", &wait_period);
-    let wait_nth_partition = args.wait_nth_partition.clone();
-    println!(
-        "Wait after processing n-th partition: <{}>",
-        wait_nth_partition
-    );
-    let truncate_target_table = args.truncate_target_table.clone();
-    println!("Truncate target table: <{:?}>", truncate_target_table);
-    let min_records_per_partition = args.min_records_per_partition.clone();
-    println!(
-        "Min records per partition: <{}>",
-        &min_records_per_partition
-    );
+    let mut settings = Settings::from_args(&args);
+    println!("{}", settings);
     // endregion
+
     print_separator();
+
     // region Config File
     println!("Loading Config File: <{}> ", &args.config_file);
     let config_provider = ConfigProvider::new(&args.config_file);
@@ -97,180 +65,244 @@ async fn main() -> Result<()> {
     let config = file_load_result.ok().unwrap();
     println!("{}", "DONE Loading Config File".green());
     // endregion
+
     print_separator();
-    // region SQL Server Metadata
-    println!("Getting SQL Server metadata ...");
-    let sql_server_provider = SqlServerProvider::new(&config.get_source_database_as_ref());
-    //let schemas = sql_server_provider.get_all_schemas().await?;
-    //let tables = sql_server_provider.get_all_tables_in_schema(&source_schema_name).await?;
-    let long_count: Result<i64> = sql_server_provider
-        .get_long_count(
-            &source_schema_name,
-            &source_table_name,
-            &column_name,
-            min,
-            max,
-        )
-        .await;
-    if long_count.is_err() {
-        eprintln!("{}", long_count.err().unwrap().to_string().red());
-        process::exit(1);
-    }
-    let sql_server_long_count = long_count.ok().unwrap();
-    if sql_server_long_count == 0 {
-        println!(
-            "{}",
-            format!(
-                "ATTEMPT TO COPY EMPTY TABLE {}.{}. Exiting...",
-                &source_schema_name, &source_table_name
-            )
-            .red()
-        );
-        process::exit(0);
-    }
-    let mut sql_server_long_count_msg = format!("Source table count: <{}>", sql_server_long_count);
-    if max != 0 {
-        sql_server_long_count_msg
-            .push_str(format!(" between min = <{}> and max = <{}>", min, max).as_str());
-    }
-    println!("{}", sql_server_long_count_msg.yellow());
-    let number_of_partitions =
-        get_number_of_partitions(sql_server_long_count, min_records_per_partition);
-    println!(
-        "{}",
-        format!("Partitions: <{}>", number_of_partitions).yellow()
-    );
-    if number_of_partitions < threads as i64 {
-        threads = number_of_partitions as u32;
-        println!("{}", format!("Threads: <{}>", threads).yellow());
-    }
-    let sql_server_metadata_result: Result<Vec<(String, PgPumpColumnType)>> = sql_server_provider
-        .get_table_metadata(&source_schema_name, &source_table_name)
-        .await;
-    if sql_server_metadata_result.is_err() {
+    println!("Getting Source DB configuration ...");
+    let source_db_provider: &dyn DbProvider = if config
+        .get_source_database_as_ref()
+        .get_db_type_as_ref()
+        .eq("sql_server")
+    {
+        &SqlServerProvider::new(&config.get_source_database_as_ref())
+    } else if config
+        .get_source_database_as_ref()
+        .get_db_type_as_ref()
+        .eq("postgres")
+    {
+        &PostgresProvider::new(&config.get_source_database_as_ref())
+    } else {
         eprintln!(
-            "{}",
-            sql_server_metadata_result.err().unwrap().to_string().red()
-        );
-        process::exit(1);
-    }
-    let sql_server_metadata = sql_server_metadata_result.ok().unwrap();
-    println!("{}", "DONE Getting SQL Server metadata".green());
-    // endregion
-    print_separator();
-    // region Postgres Metadata
-    println!("Getting Postgres metadata ...");
-    let postgres_consumer = PostgresConsumer::new(&config.get_target_database_as_ref());
-    // let postgres_metadata = postgres_consumer
-    //     .get_table_metadata(&schema_name, &table_name)
-    //     .await;
-    // let postgres_long_count = postgres_consumer
-    //     .get_long_count(&target_schema_name, &target_table_name)
-    //     .await;
-    // println!(
-    //     "{}",
-    //     format!(
-    //         "Target table count: <{}>",
-    //         postgres_long_count.ok().unwrap()
-    //     )
-    //     .yellow()
-    // );
-    match truncate_target_table {
-        YesNoEnum::Yes => {
-            let result = postgres_consumer
-                .truncate_table(&target_schema_name, &target_table_name)
-                .await;
-            if result.is_err() {
-                eprintln!("{}", result.err().unwrap().to_string().red());
-                process::exit(1);
-            }
-            if result.is_ok() {
-                println!("{}", "TARGET TABLE TRUNCATED".yellow());
-            }
-        }
-        _ => {}
-    }
-    println!("{}", "DONE Postgres metadata".green());
-    // endregion
-    print_separator();
-    // region Compute Partitions
-    println!("Compute SQL Server partitions ...");
-    let sql_server_partitions_result: Result<Vec<(i64, i64, i64, i64)>> = sql_server_provider
-        .get_copy_partitions(
-            &source_schema_name,
-            &source_table_name,
-            &column_name,
-            number_of_partitions,
-            min,
-            max,
-        )
-        .await;
-    if sql_server_partitions_result.is_err() {
-        eprintln!(
-            "{}",
-            sql_server_partitions_result
-                .err()
-                .unwrap()
-                .to_string()
+            "Unsupported database type: {}",
+            config
+                .get_source_database_as_ref()
+                .get_db_type_as_ref()
                 .red()
         );
         process::exit(1);
+    };
+    println!("{}", "DONE Source DB configuration".green());
+    //print_separator();
+    let schema_vec = if settings.get_source_schema_name_as_ref().eq("*") {
+        let result = source_db_provider.get_all_schemas().await?;
+        result
+    } else {
+        vec![settings.get_source_schema_name_as_ref().to_string()]
+    };
+    for schema in schema_vec {
+        print_separator();
+        println!("Source Schema: <{}>", schema.yellow());
+        let table_vec = if settings.get_source_table_name_as_ref().eq("*") {
+            source_db_provider.get_all_tables_in_schema(&schema).await?
+        } else {
+            vec![settings.get_source_table_name_as_ref().to_string()]
+        };
+        for table in table_vec {
+            print_separator();
+            println!("Source Table: <{}>", table.yellow());
+            print_separator();
+
+            // region Table name setup
+            let source_schema_name: String = schema.clone();
+            let source_table_name: String = table.clone();
+
+            let target_schema_name: String = if settings.get_target_schema_name_as_ref().eq("$") {
+                schema.clone()
+            } else {
+                settings.get_target_schema_name_as_ref().to_string()
+            };
+
+            let target_table_name: String = if settings.get_target_table_name_as_ref().eq("$") {
+                table.clone()
+            } else {
+                settings.get_target_table_name_as_ref().to_string()
+            };
+            // endregion
+
+            // region Source DB Metadata
+            println!("Getting Source DB metadata ...");
+            let long_count: Result<i64> = source_db_provider
+                .get_long_count(
+                    &source_schema_name,
+                    &source_table_name,
+                    settings.get_column_name_as_ref(),
+                    settings.get_min(),
+                    settings.get_max(),
+                )
+                .await;
+            if long_count.is_err() {
+                eprintln!("{}", long_count.err().unwrap().to_string().red());
+                process::exit(1);
+            }
+            let source_db_long_count = long_count.ok().unwrap();
+            if source_db_long_count == 0 {
+                println!(
+                    "{}",
+                    format!(
+                        "ATTEMPT TO COPY EMPTY TABLE {}.{}. Skipping...",
+                        &source_schema_name, &source_table_name
+                    )
+                    .red()
+                );
+                continue;
+            }
+            let mut source_db_long_count_msg =
+                format!("Source table count: <{}>", source_db_long_count);
+            if settings.get_max() != 0 {
+                source_db_long_count_msg.push_str(
+                    format!(
+                        " between min = <{}> and max = <{}>",
+                        settings.get_min(),
+                        settings.get_max()
+                    )
+                    .as_str(),
+                );
+            }
+            println!("{}", source_db_long_count_msg.yellow());
+            let number_of_partitions = get_number_of_partitions(
+                source_db_long_count,
+                settings.get_min_records_per_partition(),
+            );
+            println!(
+                "{}",
+                format!("Partitions: <{}>", number_of_partitions).yellow()
+            );
+            if number_of_partitions < settings.get_threads() as i64 {
+                settings.set_threads(number_of_partitions as u32);
+                println!(
+                    "{}",
+                    format!("Threads: <{}>", settings.get_threads()).yellow()
+                );
+            }
+            let source_db_metadata_result: Result<Vec<(String, PgPumpColumnType)>> =
+                source_db_provider
+                    .get_table_metadata(&source_schema_name, &source_table_name)
+                    .await;
+            if source_db_metadata_result.is_err() {
+                eprintln!(
+                    "{}",
+                    source_db_metadata_result.err().unwrap().to_string().red()
+                );
+                process::exit(1);
+            }
+            let source_db_metadata = source_db_metadata_result.ok().unwrap();
+            println!("{}", "DONE Getting Source DB metadata".green());
+            // endregion
+
+            print_separator();
+
+            // region Target DB Setup
+            println!("Target DB Setup ...");
+            let postgres_consumer = PostgresConsumer::new(&config.get_target_database_as_ref());
+            if settings.is_truncate_target_table() {
+                let result = postgres_consumer
+                    .truncate_table(&target_schema_name, &target_table_name)
+                    .await;
+                if result.is_err() {
+                    eprintln!("{}", result.err().unwrap().to_string().red());
+                    process::exit(1);
+                }
+                if result.is_ok() {
+                    println!("{}", "TARGET TABLE TRUNCATED".yellow());
+                }
+            }
+            println!("{}", "DONE Target DB Setup".green());
+            // endregion
+
+            print_separator();
+
+            // region Compute Source DB Partitions
+            println!("Compute Source DB partitions ...");
+            let source_db_partitions_result: Result<Vec<(i64, i64, i64, i64)>> = source_db_provider
+                .get_copy_partitions(
+                    &source_schema_name,
+                    &source_table_name,
+                    settings.get_column_name_as_ref(),
+                    number_of_partitions,
+                    settings.get_min(),
+                    settings.get_max(),
+                )
+                .await;
+            if source_db_partitions_result.is_err() {
+                eprintln!(
+                    "{}",
+                    source_db_partitions_result.err().unwrap().to_string().red()
+                );
+                process::exit(1);
+            }
+            let source_db_partitions = source_db_partitions_result.ok().unwrap();
+            println!("{}", "DONE Compute Source DB partitions".green());
+            // endregion
+
+            print_separator();
+
+            // region Source DB Connection Pool
+            println!("Creating Source DB Connection Pool ...");
+            // TODO: fix this
+            // TODO: move out of copy loop
+            let sql_server_provider = SqlServerProvider::new(&config.get_source_database_as_ref());
+            let sql_server_pool_result = sql_server_provider
+                .create_connection_pool(settings.get_threads(), settings.get_timeout())
+                .await;
+            if sql_server_pool_result.is_err() {
+                eprintln!(
+                    "{}",
+                    sql_server_pool_result.err().unwrap().to_string().red()
+                );
+                process::exit(1);
+            }
+            let sql_server_pool = sql_server_pool_result.ok().unwrap();
+            println!("{}", "DONE Creating Source DB Connection Pool".green());
+            // endregion
+
+            print_separator();
+
+            // region Target DB Connection Pool
+            println!("Creating Target DB Connection Pool ...");
+            // TODO: move out of copy loop
+            let postgres_pool_result = postgres_consumer
+                .create_connection_pool(settings.get_threads(), settings.get_timeout())
+                .await;
+            if postgres_pool_result.is_err() {
+                eprintln!("{}", postgres_pool_result.err().unwrap().to_string().red());
+                process::exit(1);
+            }
+            let postgres_pool = postgres_pool_result.ok().unwrap();
+            println!("{}", "DONE Creating Target DB Connection Pool".green());
+            // endregion
+
+            print_separator();
+
+            // region COPY DATA
+            println!("COPY DATA ...");
+            copy_data(
+                sql_server_pool,
+                postgres_pool,
+                source_db_metadata,
+                &source_schema_name,
+                &source_table_name,
+                &target_schema_name,
+                &target_table_name,
+                &source_db_partitions,
+                &settings
+            )
+            .await;
+            println!(
+                "{}",
+                "DONE COPY DATA".green()
+            );
+            // endregion
+        }
     }
-    let sql_server_partitions = sql_server_partitions_result.ok().unwrap();
-    println!("{}", "DONE Compute SQL Server partitions".green());
-    // endregion
-    print_separator();
-    // region SQL Server Connection Pool
-    println!("Creating SQL Server Connection Pool ...");
-    let sql_server_pool_result = sql_server_provider
-        .create_connection_pool(threads.clone(), timeout.clone())
-        .await;
-    if sql_server_pool_result.is_err() {
-        eprintln!(
-            "{}",
-            sql_server_pool_result.err().unwrap().to_string().red()
-        );
-        process::exit(1);
-    }
-    let sql_server_pool = sql_server_pool_result.ok().unwrap();
-    println!("{}", "DONE Creating SQL Server Connection Pool".green());
-    // endregion
-    print_separator();
-    // region Postgres Connection Pool
-    println!("Creating Postgres Connection Pool ...");
-    let postgres_pool_result = postgres_consumer
-        .create_connection_pool(threads.clone(), timeout.clone())
-        .await;
-    if postgres_pool_result.is_err() {
-        eprintln!("{}", postgres_pool_result.err().unwrap().to_string().red());
-        process::exit(1);
-    }
-    let postgres_pool = postgres_pool_result.ok().unwrap();
-    println!("{}", "DONE Creating Postgres Connection Pool".green());
-    // endregion
-    print_separator();
-    // region COPY data from SQL Server to Postgres
-    println!("COPY data from SQL Server to Postgres ...");
-    copy_data(
-        threads,
-        sql_server_pool,
-        postgres_pool,
-        sql_server_metadata,
-        &source_schema_name,
-        &source_table_name,
-        &target_schema_name,
-        &target_table_name,
-        &column_name,
-        &sql_server_partitions,
-        wait_period,
-        wait_nth_partition,
-    )
-    .await;
-    println!(
-        "{}",
-        "DONE COPY data from SQL Server to Postgres ...".green()
-    );
-    // endregion
     print_separator();
 
     Ok(())
@@ -285,7 +317,6 @@ fn get_number_of_partitions(long_count: i64, min_records_per_partition: i64) -> 
 }
 
 async fn copy_data(
-    threads: u32,
     sql_server_pool: Pool<ConnectionManager>,
     postgres_pool: Pool<PostgresConnectionManager<NoTls>>,
     sql_server_metadata: Vec<(String, PgPumpColumnType)>,
@@ -293,10 +324,8 @@ async fn copy_data(
     source_table_name: &String,
     target_schema_name: &String,
     target_table_name: &String,
-    column_name: &String,
     sql_server_partitions: &Vec<(i64, i64, i64, i64)>,
-    wait_period: u64,
-    wait_nth_partition: u32,
+    settings: &Settings,
 ) {
     let now = Instant::now();
     let mut handles = Vec::new();
@@ -318,7 +347,7 @@ async fn copy_data(
 
     let (tx, rx) = flume::unbounded();
 
-    for thread_id in 0..threads.clone() {
+    for thread_id in 0..settings.get_threads() {
         let sql_server_pool = sql_server_pool.clone();
         let postgres_column_types = postgres_column_types.clone();
         let postgres_pool = postgres_pool.clone();
@@ -328,9 +357,9 @@ async fn copy_data(
         let target_table_name = target_table_name.clone();
         let sql_server_columns = sql_server_columns.clone();
         let postgres_columns = postgres_columns.clone();
-        let column_name = column_name.clone();
-        let wait_period = wait_period.clone();
-        let wait_nth_partition = wait_nth_partition.clone();
+        let column_name = settings.get_column_name_as_ref().clone();
+        let wait_period = settings.get_wait_period();
+        let wait_nth_partition = settings.get_wait_nth_partition();
         let rx = rx.clone();
 
         let handle: JoinHandle<Result<()>> = tokio::spawn(async move {

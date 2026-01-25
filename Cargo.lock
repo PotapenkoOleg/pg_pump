@@ -1054,6 +1054,7 @@ version = "1.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "async-trait",
  "bb8",
  "bb8-postgres",
  "bb8-tiberius",

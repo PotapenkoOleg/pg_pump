@@ -20,6 +20,7 @@ impl Config {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SourceDatabase {
+    db_type: String,
     host: String,
     port: u16,
     database: String,
@@ -28,8 +29,16 @@ pub struct SourceDatabase {
 }
 
 impl SourceDatabase {
-    pub fn new(host: String, port: u16, database: String, user: String, password: String) -> Self {
+    pub fn new(
+        db_type: String,
+        host: String,
+        port: u16,
+        database: String,
+        user: String,
+        password: String,
+    ) -> Self {
         Self {
+            db_type,
             host,
             port,
             database,
@@ -38,6 +47,10 @@ impl SourceDatabase {
         }
     }
 
+    pub fn get_db_type_as_ref(&self) -> &String {
+        &self.db_type
+    }
+    
     pub fn get_host_as_ref(&self) -> &String {
         &self.host
     }
